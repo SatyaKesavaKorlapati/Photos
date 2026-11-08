@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { EyeOff, Heart, Plus, Share, Trash2, Undo2 } from 'lucide-react'
 import { api, previewUrl } from './api'
 import {
-  albumSubmenu, exportAssets, hide, openEditor, promptNewAlbum, purge, restore, rotate, toggleFavorite, trash
+  albumSubmenu, draggedIds, exportAssets, hide, openEditor, promptNewAlbum, purge, restore, rotate, toggleFavorite, trash
 } from './actions'
 import {
   applyFilter, getState, loadAssets, navigate, refreshAll, refreshMeta, setState, updateSettings, useStore
@@ -21,6 +21,7 @@ import { Sidebar, SidebarPeek } from './components/Sidebar'
 import { startPick, Toolbar, TrafficLights } from './components/TitleBar'
 import { Viewer } from './components/Viewer'
 import { Editor } from './editor/Editor'
+import { ShareLayer, openShare } from './components/Share'
 
 function FloatHeader({ range }: { range: [number, number] | null }) {
   if (!range) return null
@@ -77,7 +78,7 @@ function SelectBar() {
         <button className="sb-act" disabled={!n} title="Recover" onClick={() => restore(ids).then(() => setState({ selection: new Set() }))}><Undo2 size={18} /></button>
       ) : (
         <>
-          <button className="sb-act" disabled={!n} title="Share / Export" onClick={() => exportAssets(ids, 'current')}><Share size={18} /></button>
+          <button className="sb-act" disabled={!n} title="Share" onClick={(e) => openShare(ids, e.currentTarget)}><Share size={18} /></button>
           <button className="sb-act" disabled={!n} title="Add to Album" onClick={(e) => openMenu(e.currentTarget.getBoundingClientRect(), albumSubmenu(ids))}><Plus size={19} /></button>
         </>
       )}
@@ -152,10 +153,11 @@ function Content({ onRange, range }: { onRange: (r: [number, number] | null) => 
   return <PhotoGrid key={source} items={items} scrollToEnd={!source.startsWith('search:') && source !== 'duplicates'} emptyText={empty} onVisibleRange={onRange} />
 }
 
-function applyTheme(appearance: string, reduce: boolean) {
+function applyTheme(appearance: string, reduce: boolean, motion: boolean) {
   const dark = appearance === 'system' ? window.matchMedia('(prefers-color-scheme: dark)').matches : appearance === 'dark'
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   document.documentElement.dataset.reduce = String(reduce)
+  document.documentElement.dataset.motion = motion ? 'reduced' : 'full'
 }
 
 export default function App() {
@@ -210,12 +212,12 @@ export default function App() {
 
   useEffect(() => {
     if (!settings) return
-    applyTheme(settings.appearance, settings.reduceTransparency)
+    applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion)
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const on = () => applyTheme(settings.appearance, settings.reduceTransparency)
+    const on = () => applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion)
     mq.addEventListener('change', on)
     return () => mq.removeEventListener('change', on)
-  }, [settings?.appearance, settings?.reduceTransparency])
+  }, [settings?.appearance, settings?.reduceTransparency, settings?.reduceMotion])
 
   useEffect(() => {
     if (settings && settings.sidebarCollapsed !== collapsed) updateSettings({ sidebarCollapsed: collapsed })
@@ -263,7 +265,7 @@ export default function App() {
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('Files')) {
             e.preventDefault()
-            setDropping(true)
+            if (!draggedIds()) setDropping(true)
           }
         }}
         onDragLeave={(e) => {
@@ -271,6 +273,7 @@ export default function App() {
         }}
         onDrop={(e) => {
           setDropping(false)
+          if (draggedIds()) return e.preventDefault()
           if (!e.dataTransfer.files.length) return
           e.preventDefault()
           const paths = [...e.dataTransfer.files].map((f) => api.pathForFile(f)).filter(Boolean)
@@ -293,6 +296,7 @@ export default function App() {
       {!viewer && !editor && <TrafficLights />}
       {viewer && <Viewer />}
       {editor && <Editor key={editor.id} />}
+      <ShareLayer />
       <MenuLayer />
       <SheetLayer />
       <Slideshow />

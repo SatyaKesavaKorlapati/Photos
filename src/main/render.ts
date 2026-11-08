@@ -7,6 +7,7 @@ import sharp from 'sharp'
 import workerPath from './thumbWorker?modulePath'
 import { getDb } from './db'
 import { FFMPEG, FFMPEG_HEIC, ffmpeg, ffprobe } from './tools'
+import { getSettings } from './settings'
 
 export const THUMB_SIZE = 512
 export const PREVIEW_SIZE = 1600
@@ -404,6 +405,7 @@ export async function runBackgroundThumbs(onProgress: (p: { total: number; done:
   // Photos and videos drain independently so slow ffmpeg frames never hold up cheap HEIC thumbnails.
   const drain = async (kind: 'photo' | 'video', batch: number): Promise<void> => {
     for (;;) {
+      if (!getSettings().backgroundThumbs) return
       const rows = getDb()
         .prepare('SELECT id FROM assets WHERE thumb_done = 0 AND meta_done = 1 AND kind = ? ORDER BY taken_at DESC LIMIT ?')
         .all(kind, batch) as { id: number }[]

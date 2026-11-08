@@ -5,7 +5,8 @@ import { navigate, refreshAll, setState, toast, updateSettings, useStore, type S
 import { openMenu } from './Menu'
 import type { ExportOptions, ExportProgress, ImportProgress, PhotoFormat, VideoFormat } from '../types'
 import { formatBytes } from '../util'
-import { Segmented, Switch } from './Controls'
+import { Segmented, Slider, Switch } from './Controls'
+import { ConnectionsSheet } from './Share'
 
 const close = () => setState({ sheet: null })
 
@@ -138,9 +139,18 @@ function ImportSheet({ sheet }: { sheet: Extract<Sheet, { kind: 'import' }> }) {
 function SettingsSheet() {
   const s = useStore((st) => st.settings)
   const [info, setInfo] = useState<{ libraryDir: string; version: string } | null>(null)
+  const [cache, setCache] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
   useEffect(() => {
     api.info().then(setInfo)
+    api.cacheSize().then(setCache)
   }, [])
+  const clear = async (what: 'previews' | 'all') => {
+    setBusy(true)
+    setCache(await api.clearCache(what))
+    setBusy(false)
+    toast(what === 'all' ? 'Cache cleared — thumbnails are being rebuilt' : 'Previews cleared')
+  }
   if (!s) return null
   const Row = ({ label, sub, k }: { label: string; sub?: string; k: keyof typeof s }) => (
     <div className="row">
@@ -180,11 +190,62 @@ function SettingsSheet() {
         <div className="group-box">
           <Row label="Autoplay Live Photos" sub="Play the motion when you hover in the grid or open a Live Photo." k="autoplayLive" />
           <Row label="Autoplay Videos" k="autoplayVideos" />
+          <div className="row">
+            <div className="rl">Hold to Fast-Forward<small>Hold Space, or press and hold a playing video, to play at this speed until you let go.</small></div>
+            <Segmented small value={String(s.holdSpeed)} onChange={(v) => updateSettings({ holdSpeed: Number(v) })} options={['1.5', '2', '3'].map((v) => ({ value: v, label: `${v}×` }))} />
+          </div>
+          <div className="row">
+            <div className="rl">Skip Interval<small>The ⟲ ⟳ buttons and J / L keys.</small></div>
+            <Segmented small value={String(s.skipSeconds)} onChange={(v) => updateSettings({ skipSeconds: Number(v) })} options={['5', '10', '15', '30'].map((v) => ({ value: v, label: `${v} s` }))} />
+          </div>
+          <Row label="Loop Short Videos" sub="Clips under 30 seconds repeat." k="loopShortVideos" />
+          <Row label="Remember Volume" sub="Videos open at the volume you last used." k="rememberVolume" />
+          <div className="row">
+            <div className="rl">Slideshow Speed<small>{s.slideshowSeconds} seconds per photo</small></div>
+            <Slider className="settings-slider" min={2} max={10} step={1} value={s.slideshowSeconds} reset={3} onChange={(v) => updateSettings({ slideshowSeconds: v })} />
+          </div>
+        </div>
+
+        <div className="group-title">Sharing</div>
+        <div className="group-box">
+          <div className="row">
+            <div className="rl">Send As<small>{s.shareFormat === 'compatible' ? 'HEIC becomes JPEG and HEVC/HDR video becomes H.264, so it opens on any device or chat.' : 'Sends the current files as they are.'}</small></div>
+            <Segmented small value={s.shareFormat} onChange={(v) => updateSettings({ shareFormat: v })} options={[{ value: 'compatible', label: 'Most Compatible' }, { value: 'original', label: 'Current' }]} />
+          </div>
+          {s.shareFormat === 'compatible' && (
+            <>
+              <div className="row">
+                <div className="rl">Photo Size</div>
+                <Segmented small value={s.shareMaxSize} onChange={(v) => updateSettings({ shareMaxSize: v })} options={[{ value: 'full', label: 'Full' }, { value: 'large', label: 'Large · 2048 px' }]} />
+              </div>
+              <div className="row">
+                <div className="rl">Video Quality</div>
+                <Segmented small value={s.shareVideoQuality} onChange={(v) => updateSettings({ shareVideoQuality: v })} options={[{ value: 'original', label: 'Original' }, { value: '1080', label: '1080p' }, { value: '720', label: '720p' }]} />
+              </div>
+              <Row label="Include Camera Details" sub="Keeps date, camera and location in shared copies." k="shareIncludeMetadata" />
+            </>
+          )}
+          <Row label="Include Live Photo Motion" sub="Sends the motion clip alongside the still." k="shareIncludeLive" />
+          <div className="row">
+            <div className="rl">Share Connections<small>Blip, WhatsApp, the Windows share sheet, and apps or folders you add.</small></div>
+            <button className="btn" onClick={() => setState({ sheet: { kind: 'connections' } })}>Edit…</button>
+          </div>
         </div>
 
         <div className="group-title">Importing</div>
         <div className="group-box">
           <Row label="Copy items to the Photos library" sub="When off, photos are referenced where they are and never modified." k="copyOnImport" />
+        </div>
+
+        <div className="group-title">Advanced</div>
+        <div className="group-box">
+          <Row label="Reduce Motion" sub="Fades instead of zooms, springs and glass lenses." k="reduceMotion" />
+          <Row label="Build Thumbnails in the Background" sub="Prepares the whole library ahead of time so scrolling never waits." k="backgroundThumbs" />
+          <div className="row">
+            <div className="rl">Cache<small>{cache === null ? 'Measuring…' : `${formatBytes(cache)} of thumbnails, previews and converted video. Originals are never touched.`}</small></div>
+            <button className="btn" disabled={busy} onClick={() => clear('previews')}>Clear Previews</button>
+            <button className="btn" disabled={busy} onClick={() => clear('all')}>Rebuild All</button>
+          </div>
         </div>
 
         <div className="group-title">Library Location</div>
@@ -455,8 +516,15 @@ const SHORTCUTS: [string, [string, string][]][] = [
     ['← →', 'Previous · next'], ['.', 'Favourite'], [`${mod}E · Enter`, 'Edit'], [`${mod}I`, 'Info'], [`${mod}R`, 'Rotate'], [`${mod}L`, 'Hide'],
     ['Del', 'Delete'], ['M (hold)', 'Show original'], ['H · click', 'Hide controls'], ['F', 'Full screen'], ['Esc', 'Back']
   ]],
-  ['Video', [['Space · K', 'Play / pause'], ['J · L', 'Back / forward 10 s'], ['Shift+← →', '5 s'], ['↑ ↓', 'Volume'], ['M', 'Mute'], ['P', 'Picture in Picture']]],
-  ['Editor', [['A · F · C · V', 'Adjust · Filters · Crop · Video'], ['E', 'Auto Enhance'], ['M (hold)', 'Compare'], [`${mod}Z · ${mod}Shift+Z`, 'Undo · redo'], ['Enter · Esc', 'Done · cancel']]],
+  ['Video', [
+    ['Space · K', 'Play / pause'], ['Space (hold) · press and hold', 'Fast-forward while held'], ['J · L', 'Back / forward (skip interval)'],
+    ['Shift+← →', '5 s'], ['↑ ↓', 'Volume'], ['M', 'Mute'], ['P', 'Picture in Picture']
+  ]],
+  ['Editor', [
+    ['A · F · C · P · V', 'Adjust · Filters · Crop · Portrait · Video'], ['Click photo (Portrait)', 'Set focus'], ['E', 'Auto Enhance'],
+    ['M (hold)', 'Compare'], [`${mod}Z · ${mod}Shift+Z`, 'Undo · redo'], ['Enter · Esc', 'Done · cancel']
+  ]],
+  ['Sharing', [['Drag items out', 'Drop into Explorer, chats or any app'], ['Drag onto an album', 'Add to album']]],
   ['Export', [[`${mod}Shift+E`, 'Export'], [`${mod}Alt+Shift+E`, 'Export unmodified original']]]
 ]
 
@@ -494,5 +562,6 @@ export function SheetLayer() {
   if (sheet.kind === 'confirm') return <ConfirmSheet sheet={sheet} />
   if (sheet.kind === 'export') return <ExportSheet sheet={sheet} />
   if (sheet.kind === 'shortcuts') return <ShortcutsSheet />
+  if (sheet.kind === 'connections') return <ConnectionsSheet />
   return <PromptSheet sheet={sheet} />
 }

@@ -1,7 +1,7 @@
 import type {
   Album, AssetDetail, FolderEntry, GridAsset, ImportEntry, ImportProgress, Settings, Suggestion, ThumbProgress
 } from './types'
-import type { ExportOptions, ExportProgress } from './types'
+import type { ExportOptions, ExportProgress, ShareConnection, ShareDestination } from './types'
 import type { EditRecipe } from '../../shared/edits'
 
 interface Api {
@@ -23,6 +23,15 @@ interface Api {
   getEdit(id: number): Promise<{ recipe: EditRecipe; out: { w: number; h: number }; at: number } | null>
   saveEdit(id: number, recipe: EditRecipe, png: Uint8Array | null, out: { w: number; h: number }): Promise<void>
   revertEdit(id: number): Promise<void>
+  shareDestinations(): Promise<ShareDestination[]>
+  shareConnections(): Promise<ShareConnection[]>
+  saveShareConnections(list: ShareConnection[]): Promise<ShareConnection[]>
+  share(ids: number[], destId: string, title: string): Promise<{ ok: boolean; message?: string }>
+  pickShareTarget(kind: 'app' | 'folder'): Promise<string | null>
+  depth(id: number): Promise<{ width: number; height: number; focus: number; matte: boolean } | null>
+  startDrag(ids: number[]): void
+  cacheSize(): Promise<number>
+  clearCache(what: 'previews' | 'all'): Promise<number>
   authAvailable(): Promise<boolean>
   authVerify(reason: string): Promise<'ok' | 'cancelled' | 'unavailable'>
   albums(): Promise<Album[]>
@@ -42,6 +51,7 @@ interface Api {
   on(channel: 'export:progress', fn: (p: ExportProgress) => void): () => void
   on(channel: 'edit:progress', fn: (p: { id: number; p: number }) => void): () => void
   on(channel: 'library:changed', fn: () => void): () => void
+  on(channel: 'share:progress', fn: (p: number) => void): () => void
   on(channel: 'import:progress', fn: (p: ImportProgress) => void): () => void
   on(channel: 'thumbs:progress', fn: (p: ThumbProgress) => void): () => void
   on(channel: 'window:state', fn: (p: { maximized?: boolean; fullscreen?: boolean }) => void): () => void
@@ -72,7 +82,8 @@ export const previewUrl = (id: number, original = false): string => `media://pre
 export const fullUrl = (id: number, original = false): string => `media://full/${id}${q(id, original)}`
 export const videoUrl = (id: number, original = false): string => `media://video/${id}${q(id, original)}`
 export const liveUrl = (id: number, original = false): string => `media://live/${id}${q(id, original)}`
-export const baseUrl = (id: number): string => `media://base/${id}?t=${ver.get(id) ?? 0}`
+export const baseUrl = (id: number, original = false): string => `media://base/${id}?t=${ver.get(id) ?? 0}${original ? '&original=1' : ''}`
+export const depthUrl = (id: number): string => `media://depth/${id}`
 export const stripUrl = (id: number): string => `media://strip/${id}`
 export const bounceUrl = (id: number): string => `media://bounce/${id}${q(id)}`
 export const longExposureUrl = (id: number): string => `media://longexposure/${id}`

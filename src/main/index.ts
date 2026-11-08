@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, type MenuItemConstructorOptions } from 'electron'
-import { copyFile, mkdir, stat } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { openDb, getDb } from './db'
@@ -9,13 +9,15 @@ import {
   addToAlbum, assetDetail, createAlbum, deleteAlbum, listAlbums, listAssets, listFolders, listImports, moveAlbum, purgeAssets,
   removeFromAlbum, renameAlbum, setText, sidebarCounts, suggest, updateAssets
 } from './queries'
-import { backgroundProgress, ensurePreview, onThumbnailDone, runBackgroundThumbs, setCacheRoot } from './render'
+import { backgroundProgress, cachePath, displayPath, ensurePreview, getRenderRow, onThumbnailDone, runBackgroundThumbs, setCacheRoot } from './render'
 import { getSettings, loadSettings, setSettings, type Settings } from './settings'
 import { getEdit, revertEdit, saveEdit, setRendersDir } from './editRender'
 import { runExport, type ExportOptions } from './exporter'
 import { systemAuth, systemAuthAvailable } from './auth'
 import { readFileSync, writeFileSync } from 'node:fs'
 import type { EditRecipe } from '../shared/edits'
+import { connections, destinations, prepareFiles, saveConnections, shareFiles, type ShareConnection } from './share'
+import { ensureDepth } from './depth'
 
 app.setName('Photos')
 registerSchemes()
@@ -60,7 +62,27 @@ function libraryChanged(): void {
   }, 600)
 }
 
+async function dirSize(dir: string): Promise<number> {
+  let total = 0
+  const walk = async (d: string): Promise<void> => {
+    let list: import('node:fs').Dirent[]
+    try {
+      list = await readdir(d, { withFileTypes: true })
+    } catch {
+      return
+    }
+    await Promise.all(list.map(async (e) => {
+      const p = join(d, e.name)
+      if (e.isDirectory()) return walk(p)
+      total += (await stat(p).catch(() => ({ size: 0 }))).size
+    }))
+  }
+  await walk(dir)
+  return total
+}
+
 function kickThumbs(): void {
+  if (!getSettings().backgroundThumbs) return
   runBackgroundThumbs((p) => {
     send('thumbs:progress', p)
     if (!p.running) libraryChanged()
@@ -260,6 +282,47 @@ function registerIpc(): void {
     kickThumbs()
   })
 
+  ipcMain.handle('share:destinations', () => destinations())
+  ipcMain.handle('share:connections', () => connections())
+  ipcMain.handle('share:saveConnections', (_e, list: ShareConnection[]) => saveConnections(list))
+  ipcMain.handle('share:run', async (_e, ids: number[], destId: string, title: string) => {
+    try {
+      const files = await prepareFiles(ids, (p) => send('share:progress', p))
+      send('share:progress', 1)
+      return await shareFiles(files, destId, win, title)
+    } catch (e) {
+      return { ok: false, message: (e as Error).message.split('\n')[0] }
+    }
+  })
+  ipcMain.handle('share:pick', async (_e, kind: 'app' | 'folder') => {
+    const r = await dialog.showOpenDialog(win!, kind === 'app'
+      ? { title: 'Choose an App to Share With', properties: ['openFile'], filters: [{ name: 'Apps', extensions: isMac ? ['app'] : ['exe', 'lnk', 'bat', 'cmd'] }] }
+      : { title: 'Choose a Folder to Share Into', properties: ['openDirectory', 'createDirectory'] })
+    return r.canceled ? null : r.filePaths[0] ?? null
+  })
+  // Drags the version shown in the library; Electron offers copy/link only, so a drop never moves the file.
+  ipcMain.on('drag:start', (e, ids: number[]) => {
+    const files = ids.map((id) => getRenderRow(id)).filter((r): r is NonNullable<typeof r> => !!r).map((r) => displayPath(r))
+    if (!files.length) return
+    const thumb = cachePath('thumbs', ids[0])
+    let icon = existsSync(thumb) ? nativeImage.createFromPath(thumb) : nativeImage.createEmpty()
+    icon = icon.isEmpty() ? nativeImage.createFromBitmap(Buffer.alloc(16 * 16 * 4, 0x90), { width: 16, height: 16 }) : icon.resize({ width: 72 })
+    e.sender.startDrag({ file: files[0], files, icon })
+  })
+  ipcMain.handle('asset:depth', (_e, id: number) => ensureDepth(id).catch(() => null))
+  ipcMain.handle('cache:size', () => dirSize(join(libraryDir, 'Cache')))
+  ipcMain.handle('cache:clear', async (_e, what: 'previews' | 'all') => {
+    const root = join(libraryDir, 'Cache')
+    const kinds = what === 'all' ? ['previews', 'full', 'video', 'live', 'thumbs'] : ['previews', 'full', 'video', 'live']
+    for (const k of kinds) await rm(join(root, k), { recursive: true, force: true }).catch(() => undefined)
+    if (what === 'all') {
+      getDb().exec('UPDATE assets SET thumb_done = 0')
+      kickThumbs()
+    }
+    libraryChanged()
+    return dirSize(root)
+  })
+
   ipcMain.handle('auth:available', () => systemAuthAvailable())
   ipcMain.handle('auth:verify', (_e, reason: string) => systemAuth(win, reason))
 
@@ -309,6 +372,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => {
     const s = setSettings(patch)
     applyTheme(s)
+    if (patch.backgroundThumbs) kickThumbs()
     return s
   })
   ipcMain.handle('app:info', () => ({ platform: process.platform, libraryDir, version: app.getVersion() }))

@@ -5,6 +5,7 @@ import {
 import { api, fileManager, isMac, mod } from './api'
 import { confirmSheet, getState, patchAssets, refreshAll, setState, toast, type MenuItem } from './store'
 import { plural } from './util'
+import { openShare } from './components/Share'
 
 const word = (ids: number[]): string => {
   const list = getState().assets.filter((a) => ids.includes(a.id))
@@ -13,6 +14,22 @@ const word = (ids: number[]): string => {
   if (v === n) return plural(n, 'Video')
   if (v === 0) return plural(n, 'Photo')
   return plural(n, 'Item')
+}
+
+let dragging: number[] | null = null
+/** Items currently being dragged from the grid (the drag itself carries only file paths). */
+export const draggedIds = (): number[] | null => dragging
+export function beginDrag(ids: number[]): void {
+  dragging = ids
+  const clear = () => {
+    window.setTimeout(() => (dragging = null), 0)
+    window.removeEventListener('drop', clear, true)
+    window.removeEventListener('pointermove', clear, true)
+  }
+  window.addEventListener('drop', clear, true)
+  // Pointer events are suppressed while a native drag runs, so the first one marks its end.
+  window.setTimeout(() => window.addEventListener('pointermove', clear, true), 50)
+  api.startDrag(ids)
 }
 
 export async function toggleFavorite(ids: number[]): Promise<void> {
@@ -86,8 +103,8 @@ export function exportAssets(ids: number[], mode: 'original' | 'current'): void 
   setState({ sheet: { kind: 'export', ids, unmodified: mode === 'original' }, menu: null })
 }
 
-export function openEditor(id: number): void {
-  setState({ editor: { id }, menu: null })
+export function openEditor(id: number, tab?: NonNullable<ReturnType<typeof getState>['editor']>['tab']): void {
+  setState({ editor: { id, tab }, menu: null })
 }
 
 export async function showInFolder(id: number): Promise<void> {
@@ -149,7 +166,11 @@ export function slideshow(ids: number[]): void {
   setState({ slideshow: { ids, title: '' }, menu: null })
 }
 
-export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: boolean } = {}): MenuItem[] {
+/**
+ * Context menu for items. Every action appears once: the quick row holds Favourite / Share / Delete,
+ * and in the viewer (whose top bar already has those plus Info and Rotate) only the rest is listed.
+ */
+export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: boolean; anchor?: DOMRect } = {}): MenuItem[] {
   const s = getState()
   const list = s.assets.filter((a) => ids.includes(a.id))
   const allFav = list.length > 0 && list.every((a) => a.fav)
@@ -167,19 +188,23 @@ export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: b
     ]
   }
 
+  const runSlideshow = () => slideshow(ids.length > 1 ? ids : s.assets.map((a) => a.id).slice(Math.max(0, s.assets.findIndex((a) => a.id === ids[0]))))
   return [
-    {
-      quick: [
-        { label: 'Slideshow', icon: <Play size={17} />, onClick: () => slideshow(ids.length > 1 ? ids : s.assets.map((a) => a.id).slice(Math.max(0, s.assets.findIndex((a) => a.id === ids[0])))) },
-        { label: allFav ? 'Unfavourite' : 'Favourite', icon: allFav ? <HeartOff size={17} /> : <Heart size={17} />, onClick: () => toggleFavorite(ids) },
-        { label: 'Share', icon: <Share size={17} />, onClick: () => exportAssets(ids, 'current') },
-        { label: 'Delete', icon: <Trash2 size={17} />, danger: true, onClick: () => void trash(ids) }
-      ]
-    },
-    { label: 'Edit', icon: <SlidersHorizontal size={14} />, shortcut: `${mod}E`, onClick: () => openEditor(ids[0]), disabled: !one },
-    { label: 'Get Info', icon: <Info size={14} />, shortcut: `${mod}I`, onClick: opts.onInfo ?? (() => setState({ infoOpen: true })), disabled: !one },
-    { label: 'Rotate Anticlockwise', icon: <RotateCcw size={14} />, shortcut: `${mod}R`, onClick: () => rotate(ids) },
-    { separator: true },
+    ...(opts.viewer
+      ? []
+      : [
+          {
+            quick: [
+              { label: allFav ? 'Unfavourite' : 'Favourite', icon: allFav ? <HeartOff size={17} /> : <Heart size={17} />, onClick: () => toggleFavorite(ids) },
+              { label: 'Share', icon: <Share size={17} />, onClick: () => openShare(ids, opts.anchor) },
+              { label: 'Delete', icon: <Trash2 size={17} />, danger: true, onClick: () => void trash(ids) }
+            ]
+          } as MenuItem,
+          { label: 'Edit', icon: <SlidersHorizontal size={14} />, shortcut: `${mod}E`, onClick: () => openEditor(ids[0]), disabled: !one },
+          { label: 'Get Info', icon: <Info size={14} />, shortcut: `${mod}I`, onClick: opts.onInfo ?? (() => setState({ infoOpen: true })), disabled: !one },
+          { label: 'Rotate Anticlockwise', icon: <RotateCcw size={14} />, shortcut: `${mod}R`, onClick: () => rotate(ids) },
+          { separator: true } as MenuItem
+        ]),
     { label: 'Copy', icon: <Copy size={14} />, shortcut: `${mod}C`, onClick: () => api.copyImage(ids[0]).then(() => toast('Copied')), disabled: !one },
     { label: 'Add to', icon: <Plus size={14} />, submenu: albumSubmenu(ids) },
     ...(albumId ? [{ label: 'Remove from Album', icon: <MinusCircle size={14} />, onClick: () => removeFromAlbum(albumId, ids) } as MenuItem] : []),
@@ -195,10 +220,10 @@ export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: b
     { label: `Show in ${fileManager}`, icon: <FolderOpen size={14} />, onClick: () => showInFolder(ids[0]), disabled: !one },
     { label: 'Open With Default App', icon: <ExternalLink size={14} />, onClick: () => openWithDefault(ids[0]), disabled: !one },
     { separator: true },
+    { label: 'Play Slideshow', icon: <Play size={14} />, onClick: runSlideshow },
     inHidden
       ? { label: `Unhide ${label}`, icon: <Eye size={14} />, shortcut: `${mod}L`, onClick: () => hide(ids, false) }
-      : { label: `Hide ${label}`, icon: <EyeOff size={14} />, shortcut: `${mod}L`, onClick: () => hide(ids, true) },
-    { label: `Delete ${label}…`, icon: <Trash2 size={14} />, shortcut: isMac ? '⌘⌫' : 'Del', danger: true, onClick: () => void trash(ids) }
+      : { label: `Hide ${label}`, icon: <EyeOff size={14} />, shortcut: `${mod}L`, onClick: () => hide(ids, true) }
   ]
 }
 

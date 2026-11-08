@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Heart, Check, ChevronUp, ChevronDown } from 'lucide-react'
 import { bounceUrl, liveUrl, previewUrl, thumbUrl } from '../api'
-import { assetMenu, hide, openEditor, rotate, toggleFavorite, trash, purge } from '../actions'
+import { assetMenu, beginDrag, hide, openEditor, rotate, toggleFavorite, trash, purge } from '../actions'
 import { getState, openViewer, setState, useStore } from '../store'
 import type { GridAsset } from '../types'
 import { formatDuration } from '../util'
@@ -487,16 +487,15 @@ export function PhotoGrid({
     e.preventDefault()
     const sel = getState().selection
     const ids = sel.has(a.id) ? [...sel] : [a.id]
-    openMenu(e, assetMenu(ids))
+    openMenu(e, assetMenu(ids, { anchor: new DOMRect(e.clientX, e.clientY, 0, 0) }))
   }, [])
 
+  // A native file drag, so items can be dropped into Explorer, chats or Blip as well as onto albums.
   const onDragStart = useCallback((e: React.DragEvent, a: GridAsset) => {
+    e.preventDefault()
     const sel = getState().selection
     const ids = sel.has(a.id) ? [...sel] : [a.id]
-    e.dataTransfer.setData('application/x-photos-ids', JSON.stringify(ids))
-    e.dataTransfer.effectAllowed = 'copy'
-    const img = (e.currentTarget as HTMLElement).querySelector('img')
-    if (img) e.dataTransfer.setDragImage(img, 30, 30)
+    beginDrag(ids)
   }, [])
 
   // Ctrl/⌘ + wheel or trackpad pinch zooms the grid.

@@ -15,6 +15,23 @@ export interface Settings {
   libraryView: 'years' | 'months' | 'days' | 'all'
   hiddenLocked: boolean
   confirmDelete: boolean
+  // Sharing
+  shareFormat: 'compatible' | 'original'
+  shareMaxSize: 'full' | 'large'
+  shareVideoQuality: 'original' | '1080' | '720'
+  shareIncludeLive: boolean
+  shareIncludeMetadata: boolean
+  shareConnections?: import('./share').ShareConnection[]
+  // Playback
+  holdSpeed: number
+  skipSeconds: number
+  loopShortVideos: boolean
+  rememberVolume: boolean
+  volume: number
+  slideshowSeconds: number
+  // Advanced
+  reduceMotion: boolean
+  backgroundThumbs: boolean
 }
 
 export const DEFAULTS: Settings = {
@@ -30,7 +47,20 @@ export const DEFAULTS: Settings = {
   zoom: 5,
   libraryView: 'all',
   hiddenLocked: true,
-  confirmDelete: true
+  confirmDelete: true,
+  shareFormat: 'compatible',
+  shareMaxSize: 'full',
+  shareVideoQuality: '1080',
+  shareIncludeLive: false,
+  shareIncludeMetadata: true,
+  holdSpeed: 2,
+  skipSeconds: 10,
+  loopShortVideos: false,
+  rememberVolume: true,
+  volume: 1,
+  slideshowSeconds: 3,
+  reduceMotion: false,
+  backgroundThumbs: true
 }
 
 let file = ''

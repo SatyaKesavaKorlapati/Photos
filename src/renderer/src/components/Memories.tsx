@@ -188,6 +188,7 @@ export function Slideshow() {
   const show = useStore((s) => s.slideshow)
   const [i, setI] = useState(-1)
   const [paused, setPaused] = useState(false)
+  const seconds = useStore((s) => s.settings?.slideshowSeconds ?? 3)
   useEffect(() => {
     setI(-1)
     const t = window.setTimeout(() => setI(0), 2200)
@@ -195,9 +196,9 @@ export function Slideshow() {
   }, [show])
   useEffect(() => {
     if (!show || paused || i < 0) return
-    const t = window.setTimeout(() => setI((x) => (x + 1 >= show.ids.length ? x : x + 1)), 4200)
+    const t = window.setTimeout(() => setI((x) => (x + 1 >= show.ids.length ? x : x + 1)), (seconds + 1.2) * 1000)
     return () => window.clearTimeout(t)
-  }, [i, paused, show])
+  }, [i, paused, show, seconds])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!show) return

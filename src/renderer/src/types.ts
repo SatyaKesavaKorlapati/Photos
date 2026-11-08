@@ -97,6 +97,33 @@ export interface Settings {
   libraryView: LibraryView
   hiddenLocked: boolean
   confirmDelete: boolean
+  shareFormat: 'compatible' | 'original'
+  shareMaxSize: 'full' | 'large'
+  shareVideoQuality: 'original' | '1080' | '720'
+  shareIncludeLive: boolean
+  shareIncludeMetadata: boolean
+  shareConnections?: ShareConnection[]
+  holdSpeed: number
+  skipSeconds: number
+  loopShortVideos: boolean
+  rememberVolume: boolean
+  volume: number
+  slideshowSeconds: number
+  reduceMotion: boolean
+  backgroundThumbs: boolean
+}
+
+export type ConnectionKind = 'system' | 'blip' | 'whatsapp' | 'clipboard' | 'app' | 'folder'
+export interface ShareConnection { id: string; kind: ConnectionKind; name: string; enabled: boolean; path?: string; args?: string }
+export interface ShareDestination {
+  id: string
+  connection: string
+  kind: ConnectionKind
+  title: string
+  subtitle?: string
+  icon?: string
+  peer?: string
+  person?: boolean
 }
 
 export type LibraryView = 'years' | 'months' | 'days' | 'all'

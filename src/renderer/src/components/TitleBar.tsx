@@ -1,21 +1,43 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, X, Minus, Plus, Heart, Info, RotateCcw, Share, SlidersHorizontal, Download, FolderInput, ImagePlus, Maximize2 } from 'lucide-react'
+import { Search, X, Minus, Plus, Heart, Info, RotateCcw, Share, SlidersHorizontal, Download, FolderInput, ImagePlus, Maximize2, FileDown } from 'lucide-react'
 import { api, isMac } from '../api'
-import { assetMenu, exportAssets, rotate, toggleFavorite } from '../actions'
+import { exportAssets, rotate, toggleFavorite } from '../actions'
+import { openShare } from './Share'
 import { applyFilter, getState, navigate, setState, updateSettings, useStore } from '../store'
 import type { ShowFilter, Suggestion } from '../types'
 import { countLabel, rangeLabel } from '../util'
 import { openMenu } from './Menu'
 import { SidebarIcon } from './Icons'
+import { Slider } from './Controls'
 
 /**
- * Window controls in a glass bubble pinned to the top-left corner. At rest it is a small capsule;
- * on hover it swells and the lights magnify toward the pointer like the Dock.
+ * Window controls in a glass bubble. Hidden until the pointer is pushed right into the window's
+ * top-left corner (a hot corner, so it never covers back buttons or titles); it stays while the
+ * pointer is on it and the lights magnify toward the pointer like the Dock.
  */
-export function TrafficLights({ autoHide = false }: { autoHide?: boolean }) {
+export function TrafficLights() {
   const [mx, setMx] = useState<number | null>(null)
+  const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const hideTimer = useRef(0)
   const fullscreen = useStore((s) => s.fullscreen)
+  useEffect(() => {
+    if (!open) return
+    const onMove = (e: PointerEvent) => {
+      const r = ref.current?.getBoundingClientRect()
+      const inside = r && e.clientX <= r.right + 14 && e.clientY <= r.bottom + 14
+      window.clearTimeout(hideTimer.current)
+      if (!inside) hideTimer.current = window.setTimeout(() => setOpen(false), 260)
+    }
+    const onOut = (e: MouseEvent) => !e.relatedTarget && (hideTimer.current = window.setTimeout(() => setOpen(false), 600))
+    window.addEventListener('pointermove', onMove)
+    document.addEventListener('mouseout', onOut)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      document.removeEventListener('mouseout', onOut)
+      window.clearTimeout(hideTimer.current)
+    }
+  }, [open])
   if (isMac) return null
   const btns = [
     { cls: 'close', title: 'Close', run: () => api.win.close(), icon: <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" strokeWidth="1.2" /> },
@@ -30,7 +52,8 @@ export function TrafficLights({ autoHide = false }: { autoHide?: boolean }) {
     }
   ]
   return (
-    <div className={`traffic-zone${autoHide ? ' auto' : ''}`}>
+    <div className={`traffic-zone${open ? ' open' : ''}`}>
+      <div className="traffic-corner" onPointerEnter={() => setOpen(true)} />
       <div
         ref={ref}
         className={`traffic glass${mx !== null ? ' hot' : ''}`}
@@ -201,15 +224,15 @@ export function Toolbar({ visibleRange }: { visibleRange: [number, number] | nul
       {isGrid && (
         <div className="zoom glass">
           <button className="no-drag" onClick={() => setState({ zoom: Math.min(9, zoom + 1) })} title="Zoom Out"><Minus size={13} /></button>
-          <input
-            className="slider no-drag"
-            type="range"
+          <Slider
+            className="no-drag zoom-slider"
+            title="Thumbnail size"
             min={1}
             max={9}
             step={1}
             value={10 - zoom}
-            onChange={(e) => setState({ zoom: 10 - Number(e.target.value) })}
-            onMouseUp={() => updateSettings({ zoom: getState().zoom })}
+            onChange={(v) => setState({ zoom: 10 - v })}
+            onCommit={() => updateSettings({ zoom: getState().zoom })}
           />
           <button className="no-drag" onClick={() => setState({ zoom: Math.max(1, zoom - 1) })} title="Zoom In"><Plus size={13} /></button>
         </div>
@@ -249,20 +272,21 @@ export function Toolbar({ visibleRange }: { visibleRange: [number, number] | nul
           <button className={`tb-btn${infoOpen ? ' on' : ''}`} title="Info" disabled={ids.length !== 1} onClick={() => setState({ infoOpen: !infoOpen })}>
             <Info size={15} />
           </button>
+          <button className="tb-btn" title="Share" disabled={!ids.length} onClick={(e) => openShare(ids, e.currentTarget)}>
+            <Share size={15} />
+          </button>
           <button
             className="tb-btn"
-            title="Share"
+            title={`Export (${isMac ? '⇧⌘E' : 'Ctrl+Shift+E'})`}
             disabled={!ids.length}
             onClick={(e) =>
               openMenu(e.currentTarget.getBoundingClientRect(), [
-                { label: 'Export…', icon: <Share size={14} />, onClick: () => exportAssets(ids, 'current') },
-                { label: 'Export Unmodified Original…', icon: <Download size={14} />, onClick: () => exportAssets(ids, 'original') },
-                { separator: true },
-                ...assetMenu(ids).filter((m) => m.label === 'Copy' || m.label?.startsWith('Show in') || m.label === 'Add to')
+                { label: `Export ${ids.length > 1 ? `${ids.length} Items` : ''}…`.replace(' …', '…'), icon: <FileDown size={14} />, onClick: () => exportAssets(ids, 'current') },
+                { label: 'Export Unmodified Original…', icon: <Download size={14} />, onClick: () => exportAssets(ids, 'original') }
               ], 'right')
             }
           >
-            <Share size={15} />
+            <FileDown size={15} />
           </button>
         </div>
       )}

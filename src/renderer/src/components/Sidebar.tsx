@@ -4,7 +4,7 @@ import {
   Folder, FolderOpen, Download, Settings2, Timer, Sun, LayoutGrid, Lock
 } from 'lucide-react'
 import { api } from '../api'
-import { addToAlbum, albumMenu, promptNewAlbum } from '../actions'
+import { addToAlbum, albumMenu, draggedIds, promptNewAlbum } from '../actions'
 import { getState, navigate, refreshAll, setState, useStore } from '../store'
 import type { Album } from '../types'
 import { Spinner } from './Controls'
@@ -53,15 +53,19 @@ function Item({
       onClick={() => navigate(src)}
       onContextMenu={onContext}
       onDragOver={(e) => {
-        if (dropAlbum === undefined || !e.dataTransfer.types.includes('application/x-photos-ids')) return
+        if (dropAlbum === undefined || !draggedIds()) return
         e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'copy'
         setDrop(true)
       }}
       onDragLeave={() => setDrop(false)}
-      onDrop={async (e) => {
+      onDrop={(e) => {
         setDrop(false)
-        if (dropAlbum === undefined) return
-        const ids = JSON.parse(e.dataTransfer.getData('application/x-photos-ids') || '[]') as number[]
+        const ids = draggedIds()
+        if (dropAlbum === undefined || !ids) return
+        e.preventDefault()
+        e.stopPropagation()
         if (ids.length) addToAlbum(dropAlbum, ids)
       }}
     >

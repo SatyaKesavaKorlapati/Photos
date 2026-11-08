@@ -1,4 +1,4 @@
-import { effectiveAdjust, orientedSize, straightenScale, type CropRect, type EditRecipe } from '../../../shared/edits'
+import { effectiveAdjust, orientedSize, portraitStrength, straightenScale, type CropRect, type EditRecipe } from '../../../shared/edits'
 
 const VERT = `#version 300 es
 in vec2 a_pos;
@@ -15,28 +15,68 @@ uniform float u_flipY;
 uniform float u_exposure, u_brilliance, u_highlights, u_shadows, u_contrast, u_brightness, u_black;
 uniform float u_saturation, u_vibrance, u_warmth, u_tint;
 uniform float u_sharpness, u_definition, u_noise, u_vignette;
+uniform sampler2D u_depth;   // R = disparity (near is bright), G = person matte
+uniform float u_bokeh;       // largest blur radius in source-height uv; 0 = off
+uniform float u_focus;       // disparity kept sharp
+uniform float u_srcH;
 out vec4 outColor;
 
 float luma(vec3 c) { return dot(c, vec3(0.2627, 0.6780, 0.0593)); }
 vec3 tap(vec2 uv) { return texture(u_tex, uv).rgb; }
+
+// Circle of confusion (0…1): behind the focal plane blurs fully, in front a little less; the matte keeps people sharp.
+float coc(vec2 uv) {
+  vec2 dm = texture(u_depth, uv).rg;
+  float d = u_focus - dm.r;
+  float c = d > 0.0 ? smoothstep(0.015, 0.32, d) : 0.8 * smoothstep(0.05, 0.4, -d);
+  return c * (1.0 - smoothstep(0.35, 0.9, dm.g));
+}
+
+// Golden-angle disc gather. Each tap only counts if its own blur reaches this pixel, so the sharp
+// subject never smears into the background; bright taps are boosted into bokeh balls.
+vec3 bokeh(vec2 uv) {
+  float c0 = coc(uv);
+  float rad = u_bokeh * c0;
+  vec3 base = tap(uv);
+  if (rad * u_srcH < 0.75) return base;
+  float lod = log2(max(1.0, rad * u_srcH / 9.0));
+  vec2 asp = vec2(u_texel.x / u_texel.y, 1.0);
+  vec3 acc = textureLod(u_tex, uv, lod).rgb;
+  float wsum = 1.0;
+  for (int i = 0; i < 40; i++) {
+    float t = (float(i) + 0.5) / 40.0;
+    float r = sqrt(t) * rad;
+    float a = float(i) * 2.39996323;
+    vec2 suv = clamp(uv + vec2(cos(a), sin(a)) * r * asp, vec2(0.0), vec2(1.0));
+    float reach = coc(suv) * u_bokeh;
+    float w = clamp((reach - r) * u_srcH * 0.5 + 1.0, 0.0, 1.0);
+    vec3 s = textureLod(u_tex, suv, lod).rgb;
+    w *= 1.0 + 4.0 * smoothstep(0.72, 0.98, luma(s));
+    acc += s * w;
+    wsum += w;
+  }
+  return mix(base, acc / wsum, smoothstep(0.75, 2.5, rad * u_srcH));
+}
 
 void main() {
   vec2 frag = gl_FragCoord.xy + u_offset;
   vec2 p = vec2(frag.x / u_out.x, u_flipY > 0.5 ? 1.0 - frag.y / u_out.y : frag.y / u_out.y);
   vec2 uv = (u_map * vec3(p, 1.0)).xy;
   if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { outColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
-  vec3 c = tap(uv);
+  vec3 c = u_bokeh > 0.0 ? bokeh(uv) : tap(uv);
 
-  if (u_sharpness > 0.0 || u_noise > 0.0) {
+  // Detail passes read the unblurred source, so they fade out where the portrait blur applies.
+  float sharp = u_bokeh > 0.0 ? 1.0 - smoothstep(0.0, 0.25, coc(uv)) : 1.0;
+  if ((u_sharpness > 0.0 || u_noise > 0.0) && sharp > 0.0) {
     vec3 n = (tap(uv + vec2(u_texel.x, 0.0)) + tap(uv - vec2(u_texel.x, 0.0)) + tap(uv + vec2(0.0, u_texel.y)) + tap(uv - vec2(0.0, u_texel.y))) * 0.25;
-    c = mix(c, n, u_noise * 0.6);
-    c += (c - n) * u_sharpness * 1.6;
+    c = mix(c, mix(c, n, u_noise * 0.6), sharp);
+    c += (c - n) * u_sharpness * 1.6 * sharp;
   }
-  if (u_definition > 0.0) {
+  if (u_definition > 0.0 && sharp > 0.0) {
     vec2 r = u_texel * 7.0;
     vec3 b = (tap(uv + vec2(r.x, 0.0)) + tap(uv - vec2(r.x, 0.0)) + tap(uv + vec2(0.0, r.y)) + tap(uv - vec2(0.0, r.y))
       + tap(uv + r) + tap(uv - r) + tap(uv + vec2(r.x, -r.y)) + tap(uv + vec2(-r.x, r.y))) * 0.125;
-    c += (c - b) * u_definition * 0.9;
+    c += (c - b) * u_definition * 0.9 * sharp;
   }
 
   c *= exp2(u_exposure * 1.5 / 2.2);
@@ -140,9 +180,44 @@ export class EditRenderer {
     gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0)
     for (const n of [
       'u_tex', 'u_texel', 'u_map', 'u_out', 'u_offset', 'u_flipY', 'u_exposure', 'u_brilliance', 'u_highlights', 'u_shadows', 'u_contrast',
-      'u_brightness', 'u_black', 'u_saturation', 'u_vibrance', 'u_warmth', 'u_tint', 'u_sharpness', 'u_definition', 'u_noise', 'u_vignette'
+      'u_brightness', 'u_black', 'u_saturation', 'u_vibrance', 'u_warmth', 'u_tint', 'u_sharpness', 'u_definition', 'u_noise', 'u_vignette',
+      'u_depth', 'u_bokeh', 'u_focus', 'u_srcH'
     ]) this.loc[n] = gl.getUniformLocation(p, n)
     this.tex = gl.createTexture()!
+    this.depthTex = gl.createTexture()!
+  }
+
+  private depthTex: WebGLTexture
+  hasDepth = false
+
+  /** Depth map (R = disparity, G = matte) aligned with the source; used by the portrait effect. */
+  setDepth(el: TexImageSource | null): void {
+    const gl = this.gl
+    this.hasDepth = !!el
+    if (!el) return
+    gl.activeTexture(gl.TEXTURE1)
+    gl.bindTexture(gl.TEXTURE_2D, this.depthTex)
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
+    const g = gl as unknown as { unpackColorSpace?: string }
+    const prev = g.unpackColorSpace
+    if (prev) g.unpackColorSpace = 'srgb'
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el)
+    if (prev) g.unpackColorSpace = prev
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.activeTexture(gl.TEXTURE0)
+  }
+
+  private bindTextures(): void {
+    const gl = this.gl
+    gl.activeTexture(gl.TEXTURE1)
+    gl.bindTexture(gl.TEXTURE_2D, this.depthTex)
+    gl.uniform1i(this.loc.u_depth, 1)
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, this.tex)
+    gl.uniform1i(this.loc.u_tex, 0)
   }
 
   setSource(el: TexImageSource, w: number, h: number, mipmaps = true): void {
@@ -182,6 +257,10 @@ export class EditRenderer {
     set('u_definition', a.definition)
     set('u_noise', a.noise)
     set('u_vignette', a.vignette)
+    const pt = r.portrait
+    gl.uniform1f(this.loc.u_bokeh, adjust && pt?.on && this.hasDepth ? 0.03 * portraitStrength(pt.aperture) : 0)
+    gl.uniform1f(this.loc.u_focus, pt?.focus ?? 0.5)
+    gl.uniform1f(this.loc.u_srcH, this.srcH)
   }
 
   /** Draws to the visible canvas. `crop` overrides the recipe's crop (the Crop tab shows the whole frame). */
@@ -195,9 +274,7 @@ export class EditRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     gl.viewport(0, 0, w, h)
     gl.useProgram(this.prog)
-    gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, this.tex)
-    gl.uniform1i(this.loc.u_tex, 0)
+    this.bindTextures()
     this.uniforms(r, w, h, opts.crop, opts.adjust ?? true)
     gl.uniform2f(this.loc.u_offset, 0, 0)
     gl.uniform1f(this.loc.u_flipY, 1)
@@ -216,9 +293,7 @@ export class EditRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb)
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fbTex, 0)
     gl.useProgram(this.prog)
-    gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, this.tex)
-    gl.uniform1i(this.loc.u_tex, 0)
+    this.bindTextures()
     this.uniforms(r, outW, outH, undefined, true)
     gl.uniform1f(this.loc.u_flipY, 0)
     const buf = new Uint8Array(tile * tile * 4)

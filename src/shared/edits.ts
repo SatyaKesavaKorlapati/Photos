@@ -23,7 +23,18 @@ export interface EditRecipe {
   size: { w: number; h: number } | null
   trim: { start: number; end: number } | null
   mute: boolean
+  /**
+   * Portrait depth effect re-rendered from the unblurred original and its depth map. `aperture` is the
+   * ƒ-number (1.4 strongest … 16 almost none); `focus` is the disparity (0–1) kept sharp. Off renders the
+   * original with no blur; absent keeps the iPhone's own render.
+   */
+  portrait?: { on: boolean; aperture: number; focus: number } | null
 }
+
+export const PORTRAIT_APERTURES = [1.4, 1.8, 2, 2.2, 2.8, 3.5, 4, 4.5, 5.6, 6.3, 7.1, 8, 9, 10, 11, 13, 14, 16]
+
+/** Blur strength 0…1 for an ƒ-number, matching how the iPhone's Depth slider feels. */
+export const portraitStrength = (f: number): number => Math.max(0, Math.min(1, Math.sqrt((16 / f - 1) / (16 / 1.4 - 1))))
 
 export const ADJUST_GROUPS: { title: string; keys: { key: AdjustKey; label: string; min: number }[] }[] = [
   {
@@ -110,7 +121,7 @@ export function isIdentity(r: EditRecipe): boolean {
   return (
     Object.values(a).every((v) => Math.abs(v) < 1e-4) &&
     Math.abs(c.x) < 1e-4 && Math.abs(c.y) < 1e-4 && Math.abs(c.w - 1) < 1e-4 && Math.abs(c.h - 1) < 1e-4 &&
-    Math.abs(r.angle) < 1e-3 && r.rot90 % 4 === 0 && !r.flipH && !r.flipV && !r.size && !r.trim && !r.mute
+    Math.abs(r.angle) < 1e-3 && r.rot90 % 4 === 0 && !r.flipH && !r.flipV && !r.size && !r.trim && !r.mute && !r.portrait
   )
 }
 

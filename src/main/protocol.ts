@@ -6,6 +6,7 @@ import { Readable } from 'node:stream'
 import {
   displayPath, editBasePath, ensureBaseFull, ensureBounce, ensureCompatVideo, ensureFull, ensureLongExposure, ensurePreview, ensureStrip, ensureThumb, getRenderRow, livePath
 } from './render'
+import { depthPath, ensureDepth } from './depth'
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
@@ -89,7 +90,12 @@ export function handleMediaProtocol(): void {
         case 'base': {
           const r = getRenderRow(id)
           if (!r) break
+          if (original && r.kind === 'photo') return await serveFile(await ensureFull(id, true), req, false)
           return await serveFile(r.kind === 'video' ? editBasePath(r) : await ensureBaseFull(id), req, false)
+        }
+        case 'depth': {
+          if (!(await ensureDepth(id))) break
+          return await serveFile(depthPath(id), req)
         }
         case 'strip': return await serveFile(await ensureStrip(id, url.searchParams.get('edited') !== '1'), req)
         case 'compat': return await serveFile(await ensureCompatVideo(id, url.searchParams.get('which') === 'live' ? 'live' : 'video'), req)

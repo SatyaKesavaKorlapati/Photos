@@ -1,7 +1,138 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
-export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
-  return <button role="switch" aria-checked={on} aria-label={label} className={`switch${on ? ' on' : ''}`} onClick={() => onChange(!on)} />
+/**
+ * iOS 26 switch. Pressing lifts the knob into a clear glass capsule that overflows the track; it can be
+ * dragged across, and releasing on the other side (or a plain tap) flips it.
+ */
+export function Switch({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
+  const [press, setPress] = useState<{ side: boolean } | null>(null)
+  const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0 || disabled) return
+    const el = e.currentTarget
+    const r = el.getBoundingClientRect()
+    const x0 = e.clientX
+    let moved = false
+    let side = on
+    setPress({ side })
+    const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - x0) > 4) moved = true
+      const next = moved ? ev.clientX > r.left + r.width / 2 : on
+      if (next !== side) setPress({ side: (side = next) })
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      setPress(null)
+      const v = moved ? side : !on
+      if (v !== on) onChange(v)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+  const shown = press ? press.side : on
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      className={`switch${shown ? ' on' : ''}${press ? ' pressed' : ''}`}
+      onPointerDown={onPointerDown}
+      onClick={(e) => e.detail === 0 && onChange(!on)}
+    >
+      <span className="knob" />
+    </button>
+  )
+}
+
+/**
+ * iOS 26 slider: a thin track with a white pill knob that swells into a glass lens while dragged.
+ * Double-click restores `reset` when given; arrow keys step.
+ */
+export function Slider({
+  value, min = 0, max = 1, step = 0, onChange, onCommit, reset, className = '', title, disabled
+}: {
+  value: number
+  min?: number
+  max?: number
+  step?: number
+  onChange: (v: number) => void
+  onCommit?: (v: number) => void
+  reset?: number
+  className?: string
+  title?: string
+  disabled?: boolean
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [drag, setDrag] = useState(false)
+  const clampStep = (v: number) => {
+    const c = Math.max(min, Math.min(max, v))
+    return step ? Math.round((c - min) / step) * step + min : c
+  }
+  const at = (clientX: number) => {
+    const r = ref.current!.getBoundingClientRect()
+    return clampStep(min + ((clientX - r.left) / r.width) * (max - min))
+  }
+  const pct = max > min ? ((Math.max(min, Math.min(max, value)) - min) / (max - min)) * 100 : 0
+  const zero = min < 0 && max > 0 ? (-min / (max - min)) * 100 : 0
+  return (
+    <div
+      ref={ref}
+      role="slider"
+      tabIndex={disabled ? -1 : 0}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      title={title}
+      className={`islider${drag ? ' dragging' : ''}${disabled ? ' disabled' : ''} ${className}`}
+      onPointerDown={(e) => {
+        if (e.button !== 0 || disabled) return
+        e.preventDefault()
+        setDrag(true)
+        let last = at(e.clientX)
+        onChange(last)
+        const move = (ev: PointerEvent) => {
+          const v = at(ev.clientX)
+          if (v !== last) onChange((last = v))
+        }
+        const up = () => {
+          window.removeEventListener('pointermove', move)
+          window.removeEventListener('pointerup', up)
+          window.removeEventListener('pointercancel', up)
+          setDrag(false)
+          onCommit?.(last)
+        }
+        window.addEventListener('pointermove', move)
+        window.addEventListener('pointerup', up)
+        window.addEventListener('pointercancel', up)
+      }}
+      onDoubleClick={() => {
+        if (reset === undefined || disabled) return
+        onChange(reset)
+        onCommit?.(reset)
+      }}
+      onKeyDown={(e) => {
+        const d = step || (max - min) / 50
+        const k = e.key
+        if (k !== 'ArrowLeft' && k !== 'ArrowRight' && k !== 'ArrowUp' && k !== 'ArrowDown' && k !== 'Home' && k !== 'End') return
+        e.preventDefault()
+        e.stopPropagation()
+        const v = k === 'Home' ? min : k === 'End' ? max : clampStep(value + (k === 'ArrowRight' || k === 'ArrowUp' ? d : -d))
+        onChange(v)
+        onCommit?.(v)
+      }}
+    >
+      <div className="track">
+        <div className="fill" style={{ left: `${Math.min(zero, pct)}%`, width: `${Math.abs(pct - zero)}%` }} />
+        {zero > 0 && <div className="mid" style={{ left: `${zero}%` }} />}
+      </div>
+      <div className="knob" style={{ left: `${pct}%` }}>
+        <span className="lens" />
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -120,6 +251,7 @@ export function AdjustSlider({
   disabled?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const [drag, setDrag] = useState(false)
   const pct = (value - min) / (1 - min)
   const zero = (0 - min) / (1 - min)
   const set = (clientX: number) => {
@@ -136,15 +268,17 @@ export function AdjustSlider({
       </div>
       <div
         ref={ref}
-        className="adj-track"
+        className={`adj-track${drag ? ' dragging' : ''}`}
         onPointerDown={(e) => {
           if (disabled) return
           ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+          setDrag(true)
           set(e.clientX)
           const move = (ev: PointerEvent) => set(ev.clientX)
           const up = () => {
             window.removeEventListener('pointermove', move)
             window.removeEventListener('pointerup', up)
+            setDrag(false)
             onCommit?.()
           }
           window.addEventListener('pointermove', move)
@@ -153,7 +287,7 @@ export function AdjustSlider({
       >
         <div className="fill" style={{ left: `${Math.min(zero, pct) * 100}%`, width: `${Math.abs(pct - zero) * 100}%` }} />
         {min < 0 && <div className="mid" />}
-        <div className="knob" style={{ left: `${pct * 100}%` }} />
+        <div className="knob" style={{ left: `${pct * 100}%` }}><span className="lens" /></div>
       </div>
     </div>
   )

@@ -39,6 +39,7 @@ export type Sheet =
   | { kind: 'confirm'; title: string; message: string; confirm: string; danger?: boolean; icon?: ReactNode; onConfirm: () => void; onCancel?: () => void }
   | { kind: 'export'; ids: number[]; unmodified?: boolean }
   | { kind: 'shortcuts' }
+  | { kind: 'connections' }
   | null
 
 export interface Toast { id: number; text: string; action?: { label: string; run: () => void } }
@@ -74,11 +75,13 @@ export interface State {
   fullscreen: boolean
   version: number
   selectMode: boolean
-  editor: { id: number } | null
+  editor: { id: number; tab?: 'adjust' | 'filters' | 'crop' | 'video' | 'portrait' } | null
   /** Screen rect of the grid cell a viewer was opened from, for the zoom transition. */
   viewerOrigin: { id: number; rect: DOMRect } | null
   hiddenUnlocked: boolean
   sidebarPeek: boolean
+  /** Share sheet anchored to the button that opened it. */
+  share: { ids: number[]; anchor: { x: number; y: number; w: number; h: number } } | null
 }
 
 let state: State = {
@@ -115,7 +118,8 @@ let state: State = {
   editor: null,
   viewerOrigin: null,
   hiddenUnlocked: false,
-  sidebarPeek: false
+  sidebarPeek: false,
+  share: null
 }
 
 const listeners = new Set<() => void>()

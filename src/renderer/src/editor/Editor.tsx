@@ -2,18 +2,37 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   Wand2, RotateCcw, FlipHorizontal2, FlipVertical2, Undo2, Redo2, Play, Pause, Volume2, VolumeX, ChevronDown, Lock, Unlock, SplitSquareHorizontal
 } from 'lucide-react'
-import { api, baseUrl, bumpEditVersion, stripUrl } from '../api'
+import { api, baseUrl, bumpEditVersion, depthUrl, stripUrl } from '../api'
 import { confirmSheet, getState, loadAssets, refreshMeta, setState, toast, useStore } from '../store'
-import { AdjustSlider, Segmented, Spinner } from '../components/Controls'
+import { AdjustSlider, Segmented, Slider, Spinner } from '../components/Controls'
 import { invalidateDetail, useDetail } from '../components/InfoPanel'
 import { TrafficLights } from '../components/TitleBar'
 import { formatDuration } from '../util'
 import {
-  ADJUST_GROUPS, ASPECTS, FILTERS, emptyRecipe, isIdentity, orientedSize, outputSize, type AdjustKey, type CropRect, type EditRecipe, type FilterName
+  ADJUST_GROUPS, ASPECTS, FILTERS, PORTRAIT_APERTURES, emptyRecipe, isIdentity, orientedSize, outputSize,
+  type AdjustKey, type CropRect, type EditRecipe, type FilterName
 } from '../../../shared/edits'
-import { autoEnhance, EditRenderer } from './gl'
+import { autoEnhance, EditRenderer, sourceMap } from './gl'
 
-type Tab = 'adjust' | 'filters' | 'crop' | 'video'
+type Tab = 'adjust' | 'filters' | 'crop' | 'video' | 'portrait'
+
+interface DepthMap { width: number; height: number; focus: number; matte: boolean; px: Uint8ClampedArray }
+
+/** Disparity under a source-uv point, averaged over a small window so a click lands on the surface, not noise. */
+function depthAt(m: DepthMap, u: number, v: number): number {
+  const cx = Math.round(clamp01(u) * (m.width - 1))
+  const cy = Math.round(clamp01(v) * (m.height - 1))
+  const r = Math.max(2, Math.round(m.width / 160))
+  let sum = 0
+  let n = 0
+  for (let y = Math.max(0, cy - r); y <= Math.min(m.height - 1, cy + r); y++) {
+    for (let x = Math.max(0, cx - r); x <= Math.min(m.width - 1, cx + r); x++) {
+      sum += m.px[(y * m.width + x) * 4]
+      n++
+    }
+  }
+  return n ? sum / n / 255 : 0.5
+}
 
 const same = (a: EditRecipe, b: EditRecipe): boolean => JSON.stringify(a) === JSON.stringify(b)
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
@@ -182,7 +201,8 @@ export function Editor() {
   const id = editor.id
   const d = useDetail(id)
   const isVideo = asset?.video ?? d?.kind === 'video'
-  const [tab, setTab] = useState<Tab>('adjust')
+  const [tab, setTab] = useState<Tab>(editor.tab ?? 'adjust')
+  const [depth, setDepth] = useState<DepthMap | null>(null)
   const [recipe, setRecipe] = useState<EditRecipe | null>(null)
   const committed = useRef<EditRecipe | null>(null)
   const initial = useRef<EditRecipe | null>(null)
@@ -228,19 +248,22 @@ export function Editor() {
     rendererRef.current = r
     let cancelled = false
     if (d.kind === 'photo') {
-      const img = new Image()
-      img.crossOrigin = 'anonymous'
-      img.decoding = 'async'
-      img.src = baseUrl(id)
-      img
-        .decode()
-        .then(() => {
-          if (cancelled) return
-          r.setSource(img, img.naturalWidth, img.naturalHeight)
-          imgRef.current = img
-          setReady(true)
-        })
-        .catch(() => setError('This photo could not be opened for editing.'))
+      api.depth(id).then(async (info) => {
+        if (cancelled) return
+        if (!info) return setTab((t) => (t === 'portrait' ? 'adjust' : t))
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        img.src = depthUrl(id)
+        await img.decode()
+        if (cancelled) return
+        r.setDepth(img)
+        const c = document.createElement('canvas')
+        c.width = img.naturalWidth
+        c.height = img.naturalHeight
+        const g = c.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' })!
+        g.drawImage(img, 0, 0)
+        setDepth({ ...info, width: c.width, height: c.height, px: g.getImageData(0, 0, c.width, c.height).data })
+      }).catch(() => undefined)
     }
     return () => {
       cancelled = true
@@ -248,6 +271,32 @@ export function Editor() {
       rendererRef.current = null
     }
   }, [d?.id])
+
+  // The iPhone's portrait render is the usual base; re-rendering the depth effect needs the unblurred original.
+  const iphonePortrait = !!d?.subtypes.includes('portrait') && !!d?.edited_path
+  const needsOriginal = !!recipe?.portrait && !!d?.edited_path
+  useEffect(() => {
+    const r = rendererRef.current
+    if (!r || !d || d.kind !== 'photo') return
+    let cancelled = false
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.decoding = 'async'
+    img.src = baseUrl(id, needsOriginal)
+    img
+      .decode()
+      .then(() => {
+        if (cancelled || rendererRef.current !== r) return
+        r.setSource(img, img.naturalWidth, img.naturalHeight)
+        imgRef.current = img
+        setReady(true)
+        drawRef.current()
+      })
+      .catch(() => !cancelled && setError('This photo could not be opened for editing.'))
+    return () => {
+      cancelled = true
+    }
+  }, [d?.id, needsOriginal])
 
   // Videos stream frames into the same pipeline.
   useEffect(() => {
@@ -282,12 +331,30 @@ export function Editor() {
     const r = rendererRef.current
     if (!r || !recipe || !r.srcW || !dispW) return
     const dpr = Math.min(2, window.devicePixelRatio || 1)
-    const shown = compare && initial.current ? { ...emptyRecipe(), rot90: recipe.rot90, flipH: recipe.flipH, flipV: recipe.flipV, angle: recipe.angle, crop: recipe.crop } : recipe
+    // Comparing against the iPhone's portrait render while the base is the original: approximate it with its own settings.
+    const before = needsOriginal && iphonePortrait && depth ? { on: true, aperture: d?.edits?.portrait?.aperture ?? 4.5, focus: depth.focus } : null
+    const shown = compare && initial.current ? { ...emptyRecipe(), rot90: recipe.rot90, flipH: recipe.flipH, flipV: recipe.flipV, angle: recipe.angle, crop: recipe.crop, portrait: before } : recipe
     r.draw(shown, Math.round(dispW * dpr), Math.round(dispH * dpr), { crop: cropping ? { x: 0, y: 0, w: 1, h: 1 } : undefined })
   }
   useEffect(() => {
     drawRef.current()
-  }, [recipe, dispW, dispH, ready, compare, cropping, video])
+  }, [recipe, dispW, dispH, ready, compare, cropping, video, depth])
+
+  const pt = recipe && depth ? recipe.portrait ?? { on: iphonePortrait, aperture: d?.edits?.portrait?.aperture ?? 4.5, focus: depth.focus } : null
+  const setPortrait = (patch: Partial<NonNullable<EditRecipe['portrait']>>, commit = true) =>
+    recipe && pt && update({ ...recipe, portrait: { ...pt, ...patch } }, commit)
+  const [focusMark, setFocusMark] = useState<{ x: number; y: number; k: number } | null>(null)
+  const pickFocus = (e: React.PointerEvent) => {
+    const r = rendererRef.current
+    if (!recipe || !depth || !r || tab !== 'portrait') return
+    const box = e.currentTarget.getBoundingClientRect()
+    const x = (e.clientX - box.left) / box.width
+    const y = (e.clientY - box.top) / box.height
+    const m = sourceMap(recipe, r.srcW, r.srcH)
+    const focus = depthAt(depth, m[0] * x + m[1] * y + m[2], m[3] * x + m[4] * y + m[5])
+    setFocusMark({ x: e.clientX - box.left, y: e.clientY - box.top, k: Date.now() })
+    setPortrait({ focus, on: true })
+  }
 
   // Filter previews, rendered once from a small copy of the photo.
   useEffect(() => {
@@ -428,6 +495,7 @@ export function Editor() {
       if (k === 'f') setTab('filters')
       if (k === 'c') setTab('crop')
       if (k === 'v' && isVideo) setTab('video')
+      if (k === 'p' && depth) setTab('portrait')
       if (k === 'e') runAuto()
     }
     const onUp = (e: KeyboardEvent) => e.key.toLowerCase() === 'm' && setCompare(false)
@@ -487,12 +555,14 @@ export function Editor() {
     { value: 'adjust', label: 'Adjust' },
     { value: 'filters', label: 'Filters' },
     { value: 'crop', label: 'Crop' },
+    ...(depth ? [{ value: 'portrait' as Tab, label: 'Portrait' }] : []),
     ...(isVideo ? [{ value: 'video' as Tab, label: 'Video' }] : [])
   ]
+  const apIndex = pt ? PORTRAIT_APERTURES.reduce((best, f, i) => (Math.abs(f - pt.aperture) < Math.abs(PORTRAIT_APERTURES[best] - pt.aperture) ? i : best), 0) : 0
 
   return (
     <div className="editor" onMouseDown={(e) => e.stopPropagation()}>
-      <TrafficLights autoHide />
+      <TrafficLights />
       <div className="ed-top">
         <div className="ed-left">
           <button className="btn ed-cancel" onClick={cancel}>Cancel</button>
@@ -525,8 +595,13 @@ export function Editor() {
 
       <div className="ed-main">
         <div ref={stageRef} className="ed-stage">
-          <div className="ed-canvas-wrap" style={{ width: dispW, height: dispH }}>
+          <div
+            className={`ed-canvas-wrap${tab === 'portrait' && depth ? ' focus-pick' : ''}`}
+            style={{ width: dispW, height: dispH }}
+            onPointerDown={pickFocus}
+          >
             <canvas ref={canvasRef} style={{ width: dispW, height: dispH, opacity: ready ? 1 : 0 }} />
+            {tab === 'portrait' && focusMark && <div key={focusMark.k} className="focus-mark" style={{ left: focusMark.x, top: focusMark.y }} />}
             {cropping && recipe && ready && (
               <CropOverlay
                 w={dispW}
@@ -632,16 +707,14 @@ export function Editor() {
               </div>
               <div className="ed-sub">Straighten</div>
               <div className="straighten">
-                <input
-                  type="range"
-                  className="slider"
+                <Slider
                   min={-45}
                   max={45}
                   step={0.1}
+                  reset={0}
                   value={recipe.angle}
-                  onChange={(e) => update({ ...recipe, angle: Math.abs(Number(e.target.value)) < 0.3 ? 0 : Number(e.target.value) }, false)}
-                  onPointerUp={commitNow}
-                  onDoubleClick={() => update({ ...recipe, angle: 0 })}
+                  onChange={(v) => update({ ...recipe, angle: Math.abs(v) < 0.3 ? 0 : v }, false)}
+                  onCommit={commitNow}
                 />
                 <span>{recipe.angle.toFixed(1)}°</span>
               </div>
@@ -713,6 +786,43 @@ export function Editor() {
               >
                 Reset Crop & Rotation
               </button>
+            </div>
+          )}
+
+          {recipe && tab === 'portrait' && pt && (
+            <div className="ed-panel">
+              <div className="pt-head">
+                <button className={`pt-pill${pt.on ? ' on' : ''}`} onClick={() => setPortrait({ on: !pt.on })}>Portrait</button>
+              </div>
+              <div className={`pt-dial${pt.on ? '' : ' off'}`}>
+                <span className="pt-f">ƒ{pt.aperture < 10 ? pt.aperture.toFixed(1) : pt.aperture.toFixed(0)}</span>
+                <span className="pt-label">Depth</span>
+              </div>
+              <Slider
+                className="pt-slider"
+                min={0}
+                max={PORTRAIT_APERTURES.length - 1}
+                step={1}
+                value={apIndex}
+                reset={PORTRAIT_APERTURES.indexOf(4.5)}
+                onChange={(i) => setPortrait({ aperture: PORTRAIT_APERTURES[i], on: true }, false)}
+                onCommit={commitNow}
+              />
+              <div className="pt-ticks">
+                {PORTRAIT_APERTURES.map((f, i) => (
+                  <span key={f} className={i === apIndex ? 'on' : [0, 4, 8, 11, 17].includes(i) ? 'major' : ''}>{[0, 4, 8, 11, 17].includes(i) ? f : ''}</span>
+                ))}
+              </div>
+              <div className="pt-ends"><span>More blur</span><span>Less blur</span></div>
+              <div className="ed-note" style={{ marginTop: 16 }}>
+                Click the photo to choose what stays in focus. The effect is rendered from the original and its depth
+                map{depth?.matte ? ' and person matte' : ''}; the original file is never changed.
+              </div>
+              {recipe.portrait && (
+                <button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={() => update({ ...recipe, portrait: null })}>
+                  {iphonePortrait ? 'Restore iPhone Portrait' : 'Reset Portrait'}
+                </button>
+              )}
             </div>
           )}
 

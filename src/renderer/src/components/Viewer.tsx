@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronLeft, ChevronRight, Heart, Info, RotateCcw, Share, MoreHorizontal, Play, Pause, Volume2, Volume1, VolumeX, Maximize, Minimize,
-  ChevronDown, Check, PictureInPicture2, Repeat, RotateCcw as Back10, RotateCw as Fwd10, Gauge, Trash2
+  ChevronDown, Check, PictureInPicture2, Repeat, RotateCcw as Back10, RotateCw as Fwd10, Gauge, Trash2, SlidersHorizontal, FastForward
 } from 'lucide-react'
 import {
   api, bounceUrl, compatUrl, fullUrl, liveUrl, longExposureUrl, previewUrl, stripUrl, thumbUrl, videoUrl
 } from '../api'
-import { assetMenu, exportAssets, hide, openEditor, purge, rotate, toggleFavorite, trash } from '../actions'
-import { getState, setState, useStore } from '../store'
+import { assetMenu, hide, openEditor, purge, rotate, toggleFavorite, trash } from '../actions'
+import { openShare } from './Share'
+import { getState, setState, updateSettings, useStore } from '../store'
 import type { AssetDetail, GridAsset } from '../types'
 import { clamp, formatDayLong, formatDuration, formatTime } from '../util'
-import { Spinner } from './Controls'
+import { Slider, Spinner } from './Controls'
 import { BounceIcon, LiveIcon, LongExposureIcon, LoopIcon, PortraitIcon } from './Icons'
 import { InfoPanel, QualityTags, invalidateDetail, useDetail } from './InfoPanel'
 import { openMenu } from './Menu'
@@ -38,7 +39,7 @@ function useStageSize(ref: React.RefObject<HTMLDivElement | null>) {
 }
 
 /** QuickTime / iOS style transport: skip ±10 s, scrubber with frame preview, speed, volume, loop, PiP, full screen. */
-function VideoControls({ a, video, visible, fullscreen }: { a: GridAsset; video: HTMLVideoElement | null; visible: boolean; fullscreen: boolean }) {
+function VideoControls({ a, video, visible, fullscreen, skip: skipBy }: { a: GridAsset; video: HTMLVideoElement | null; visible: boolean; fullscreen: boolean; skip: number }) {
   const [, force] = useState(0)
   const [hover, setHover] = useState<number | null>(null)
   const [volOpen, setVolOpen] = useState(false)
@@ -69,11 +70,11 @@ function VideoControls({ a, video, visible, fullscreen }: { a: GridAsset; video:
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className="vc-row">
-        <button title="Back 10 seconds (J)" onClick={() => skip(-10)}><Back10 size={16} /><small>10</small></button>
-        <button className="pp" title="Play/Pause (Space)" onClick={() => (video.paused ? video.play() : video.pause())}>
+        <button title={`Back ${skipBy} seconds (J)`} onClick={() => skip(-skipBy)}><Back10 size={16} /><small>{skipBy}</small></button>
+        <button className="pp" title="Play/Pause (Space · hold Space to fast-forward)" onClick={() => (video.paused ? video.play() : video.pause())}>
           {video.paused ? <Play size={20} fill="currentColor" /> : <Pause size={20} fill="currentColor" />}
         </button>
-        <button title="Forward 10 seconds (L)" onClick={() => skip(10)}><Fwd10 size={16} /><small>10</small></button>
+        <button title={`Forward ${skipBy} seconds (L)`} onClick={() => skip(skipBy)}><Fwd10 size={16} /><small>{skipBy}</small></button>
         <span className="t">{formatDuration(video.currentTime)}</span>
         <div
           ref={scrubRef}
@@ -125,16 +126,12 @@ function VideoControls({ a, video, visible, fullscreen }: { a: GridAsset; video:
         <div className="vol" onMouseEnter={() => setVolOpen(true)} onMouseLeave={() => setVolOpen(false)}>
           <button title="Mute (M)" onClick={() => (video.muted = !video.muted)}><VolIcon size={16} /></button>
           <div className={`vol-pop${volOpen ? ' open' : ''}`}>
-            <input
-              type="range"
-              className="slider"
-              min={0}
-              max={1}
-              step={0.01}
+            <Slider
+              title="Volume"
               value={video.muted ? 0 : video.volume}
-              onChange={(e) => {
-                video.volume = Number(e.target.value)
-                video.muted = video.volume === 0
+              onChange={(v) => {
+                video.volume = v
+                video.muted = v === 0
               }}
             />
           </div>
@@ -185,6 +182,27 @@ function Stage({ a, d, showOriginal, liveStyle, chrome, fullscreen, intro, outro
   const holdTimer = useRef<number>(0)
   const tapTimer = useRef<number>(0)
   const liveRef = useRef<HTMLVideoElement>(null)
+  const spaceTimer = useRef<number>(0)
+  const spaceDown = useRef(false)
+  const boost = useRef<{ rate: number; paused: boolean } | null>(null)
+  const [boosting, setBoosting] = useState(false)
+
+  const startBoost = () => {
+    if (!videoEl || boost.current) return
+    boost.current = { rate: videoEl.playbackRate, paused: videoEl.paused }
+    videoEl.playbackRate = getState().settings?.holdSpeed ?? 2
+    if (videoEl.paused) videoEl.play().catch(() => undefined)
+    setBoosting(true)
+  }
+  const endBoost = () => {
+    const b = boost.current
+    if (!b) return
+    boost.current = null
+    setBoosting(false)
+    if (!videoEl) return
+    videoEl.playbackRate = b.rate
+    if (b.paused) videoEl.pause()
+  }
 
   const rot = a.rot
   const natW = d?.user_edits?.out.w || (d?.user_render ? a.w : d?.width) || a.w || 1600
@@ -304,12 +322,21 @@ function Stage({ a, d, showOriginal, liveStyle, chrome, fullscreen, intro, outro
       if (e.key === '-') zoomAt(scale / 1.4)
       if (e.key === '0') zoomAt(1)
       if (a.video && videoEl) {
-        if (e.key === ' ' || k === 'k') {
+        const skip = settings?.skipSeconds ?? 10
+        // Space: a tap toggles playback on release; holding it plays fast until let go, like YouTube.
+        if (e.key === ' ') {
           e.preventDefault()
-          videoEl.paused ? videoEl.play() : videoEl.pause()
+          // A focused button would also "click" on Space release and toggle playback a second time.
+          if (document.activeElement instanceof HTMLButtonElement) document.activeElement.blur()
+          if (!e.repeat) {
+            window.clearTimeout(spaceTimer.current)
+            spaceDown.current = true
+            spaceTimer.current = window.setTimeout(() => spaceDown.current && startBoost(), 350)
+          }
         }
-        if (k === 'j') videoEl.currentTime = Math.max(0, videoEl.currentTime - 10)
-        if (k === 'l' && !e.ctrlKey && !e.metaKey) videoEl.currentTime = Math.min(videoEl.duration, videoEl.currentTime + 10)
+        if (k === 'k') videoEl.paused ? videoEl.play() : videoEl.pause()
+        if (k === 'j') videoEl.currentTime = Math.max(0, videoEl.currentTime - skip)
+        if (k === 'l' && !e.ctrlKey && !e.metaKey) videoEl.currentTime = Math.min(videoEl.duration, videoEl.currentTime + skip)
         if (e.shiftKey && e.key === 'ArrowLeft') videoEl.currentTime = Math.max(0, videoEl.currentTime - 5)
         if (e.shiftKey && e.key === 'ArrowRight') videoEl.currentTime = Math.min(videoEl.duration, videoEl.currentTime + 5)
         if (e.key === 'ArrowUp') { e.preventDefault(); videoEl.volume = Math.min(1, videoEl.volume + 0.1); videoEl.muted = false }
@@ -321,9 +348,46 @@ function Stage({ a, d, showOriginal, liveStyle, chrome, fullscreen, intro, outro
         setLivePlaying(true)
       }
     }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || !a.video || !videoEl || !spaceDown.current) return
+      e.preventDefault()
+      spaceDown.current = false
+      window.clearTimeout(spaceTimer.current)
+      if (boost.current) endBoost()
+      else videoEl.paused ? videoEl.play() : videoEl.pause()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [scale, zoomAt, a.video, a.live, videoEl])
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [scale, zoomAt, a.video, a.live, videoEl, settings?.skipSeconds, settings?.holdSpeed])
+
+  // A video starts at the remembered volume, and short clips loop if that's turned on.
+  useEffect(() => {
+    if (!videoEl || !settings) return
+    if (settings.rememberVolume) videoEl.volume = clamp(settings.volume, 0, 1)
+    const meta = () => {
+      if (settings.loopShortVideos && videoEl.duration && videoEl.duration < 30) videoEl.loop = true
+    }
+    meta()
+    let t = 0
+    const vol = () => {
+      if (!getState().settings?.rememberVolume || videoEl.muted) return
+      window.clearTimeout(t)
+      t = window.setTimeout(() => updateSettings({ volume: Math.round(videoEl.volume * 100) / 100 }), 600)
+    }
+    videoEl.addEventListener('loadedmetadata', meta)
+    videoEl.addEventListener('volumechange', vol)
+    return () => {
+      window.clearTimeout(t)
+      videoEl.removeEventListener('loadedmetadata', meta)
+      videoEl.removeEventListener('volumechange', vol)
+    }
+  }, [videoEl])
+
+  useEffect(() => () => endBoost(), [videoEl])
 
   // Videos hide the controls while playing, like QuickTime; any movement brings them back.
   useEffect(() => {
@@ -342,13 +406,17 @@ function Stage({ a, d, showOriginal, liveStyle, chrome, fullscreen, intro, outro
     const start = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y, t: Date.now() }
     let moved = false
     const move = (ev: MouseEvent) => {
-      if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 5) moved = true
+      if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 5) {
+        moved = true
+        if (!boost.current) window.clearTimeout(holdTimer.current)
+      }
       if (scale > 1) setPan({ x: start.px + ev.clientX - start.x, y: start.py + ev.clientY - start.y })
     }
     const up = (ev: MouseEvent) => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
       window.clearTimeout(holdTimer.current)
+      if (boost.current) return endBoost()
       const dx = ev.clientX - start.x
       // A quick horizontal swipe pages between photos, like on iPhone.
       if (scale === 1 && Math.abs(dx) > 80 && Math.abs(ev.clientY - start.y) < 60 && Date.now() - start.t < 600) {
@@ -363,6 +431,8 @@ function Stage({ a, d, showOriginal, liveStyle, chrome, fullscreen, intro, outro
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
     if (a.live && liveStyle === 'live' && scale === 1) holdTimer.current = window.setTimeout(() => setLivePlaying(true), 260)
+    // Touch-and-hold a playing video to fast-forward while held.
+    if (a.video && videoEl && !videoEl.paused && scale === 1) holdTimer.current = window.setTimeout(startBoost, 450)
   }
 
   let intoTransform = ''
@@ -389,7 +459,17 @@ function Stage({ a, d, showOriginal, liveStyle, chrome, fullscreen, intro, outro
       }}
       onContextMenu={(e) => {
         e.preventDefault()
-        openMenu(e, assetMenu([a.id], { onInfo: onInfoToggle, viewer: true }))
+        openMenu(e, [
+          {
+            quick: [
+              { label: a.fav ? 'Unfavourite' : 'Favourite', icon: <Heart size={17} fill={a.fav ? 'currentColor' : 'none'} />, onClick: () => toggleFavorite([a.id]) },
+              { label: 'Share', icon: <Share size={17} />, onClick: () => openShare([a.id], new DOMRect(e.clientX, e.clientY, 0, 0)) },
+              { label: 'Info', icon: <Info size={17} />, onClick: onInfoToggle },
+              { label: 'Edit', icon: <SlidersHorizontal size={17} />, onClick: () => openEditor(a.id) }
+            ]
+          },
+          ...assetMenu([a.id], { viewer: true })
+        ])
       }}
       style={{ cursor: scale > 1 ? 'grab' : undefined }}
     >
@@ -466,7 +546,12 @@ function Stage({ a, d, showOriginal, liveStyle, chrome, fullscreen, intro, outro
         <ChipRow a={a} d={d} visible={chrome} liveStyle={liveStyle} showOriginal={showOriginal} onPlayLive={() => setLivePlaying(true)} onStopLive={() => setLivePlaying(false)} livePlaying={showMotion} />
       )}
 
-      {a.video && <VideoControls a={a} video={videoEl} visible={chrome || !!videoEl?.paused} fullscreen={fullscreen} />}
+      {boosting && (
+        <div className="boost-badge glass">
+          {settings?.holdSpeed ?? 2}× <FastForward size={14} fill="currentColor" />
+        </div>
+      )}
+      {a.video && <VideoControls a={a} video={videoEl} visible={chrome || !!videoEl?.paused} fullscreen={fullscreen} skip={settings?.skipSeconds ?? 10} />}
       {a.video && videoEl?.paused && loaded && !chrome && (
         <button className="big-play glass" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); videoEl.play() }}>
           <Play size={30} fill="currentColor" />
@@ -498,6 +583,18 @@ function ChipRow({
   livePlaying: boolean
 }) {
   const portrait = d?.subtypes.includes('portrait') && !!d.edited_path
+  // Newer iPhones keep portraits unblurred and apply depth when shown; offer it when the photo has a depth map.
+  const [hasDepth, setHasDepth] = useState(false)
+  useEffect(() => {
+    setHasDepth(false)
+    if (!d || portrait || !d.subtypes.includes('portrait') || d.kind !== 'photo') return
+    let live = true
+    api.depth(d.id).then((x) => live && setHasDepth(!!x)).catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [d?.id, portrait])
+  const edited = d?.user_edits?.recipe?.portrait
   return (
     <div className={`chip-row${visible ? '' : ' gone'}`} onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
       {a.live && (
@@ -532,6 +629,21 @@ function ChipRow({
           <PortraitIcon size={13} />
           Portrait
           {d?.edits?.portrait?.lighting && !showOriginal ? <span style={{ opacity: 0.7, fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>· {d.edits.portrait.lighting}</span> : null}
+        </button>
+      )}
+      {portrait && !showOriginal && (
+        <button className="chip" title="Adjust depth (opens Portrait in Edit)" onClick={() => openEditor(a.id, 'portrait')}>
+          ƒ{(edited?.aperture ?? d?.edits?.portrait?.aperture ?? 4.5).toFixed(1)}
+        </button>
+      )}
+      {!portrait && hasDepth && (
+        <button
+          className={`chip${edited?.on && !showOriginal ? ' portrait-on' : ''}`}
+          title="Add or adjust the portrait depth effect"
+          onClick={() => openEditor(a.id, 'portrait')}
+        >
+          <PortraitIcon size={13} />
+          Portrait{edited?.on ? ` · ƒ${edited.aperture.toFixed(1)}` : ''}
         </button>
       )}
     </div>
@@ -657,10 +769,8 @@ export function Viewer() {
       if (getState().menu || getState().sheet || getState().editor) return
       const ctrl = e.ctrlKey || e.metaKey
       const k = e.key.toLowerCase()
-      if (e.key === 'Escape') {
-        if (getState().fullscreen) return api.win.fullscreen(false)
-        return close()
-      }
+      // Esc always returns to the album; the window stays full screen (F / F11 toggle that).
+      if (e.key === 'Escape') return close()
       if (e.key === 'ArrowRight' && !e.shiftKey) return go(1)
       if (e.key === 'ArrowLeft' && !e.shiftKey) return go(-1)
       if (k === 'm' && !ctrl && !a?.video && (d?.edited_path || d?.user_render)) setHoldOriginal(true)
@@ -699,7 +809,7 @@ export function Viewer() {
       onMouseDown={(e) => e.stopPropagation()}
       onMouseMove={poke}
     >
-      <TrafficLights autoHide />
+      <TrafficLights />
       <div className={`viewer-head${chrome ? '' : ' gone'}`} onMouseDown={(e) => e.stopPropagation()}>
         <button className="back-pill glass" onClick={close} title="Back (Esc)">
           <ChevronLeft size={18} />
@@ -720,7 +830,7 @@ export function Viewer() {
             <button className="tb-btn" title="Rotate (Ctrl+R)" onClick={() => rotate([a.id])}>
               <RotateCcw size={16} />
             </button>
-            <button className="tb-btn" title="Share / Export" onClick={() => exportAssets([a.id], 'current')}>
+            <button className="tb-btn" title="Share" onClick={(e) => openShare([a.id], e.currentTarget)}>
               <Share size={16} />
             </button>
             <button className="tb-btn" title="Delete (Del)" onClick={() => void remove()}>
@@ -745,7 +855,7 @@ export function Viewer() {
                   { label: chrome ? 'Hide Controls' : 'Show Controls', shortcut: 'H', onClick: () => setChrome(!chrome) },
                   { label: fullscreen ? 'Exit Full Screen' : 'Enter Full Screen', shortcut: 'F', onClick: () => api.win.fullscreen() },
                   { separator: true },
-                  ...assetMenu([a.id], { onInfo: () => setState({ infoOpen: true }) })
+                  ...assetMenu([a.id], { viewer: true })
                 ], 'right')
               }
             >
