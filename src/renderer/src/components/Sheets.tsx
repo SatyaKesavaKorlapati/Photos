@@ -141,10 +141,29 @@ function SettingsSheet() {
   const [info, setInfo] = useState<{ libraryDir: string; version: string } | null>(null)
   const [cache, setCache] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
+  const [q, setQ] = useState('')
   useEffect(() => {
     api.info().then(setInfo)
     api.cacheSize().then(setCache)
   }, [])
+  useEffect(() => {
+    const root = document.querySelector('.sheet')
+    if (!root) return
+    const needle = q.trim().toLowerCase()
+    root.querySelectorAll('.group-title').forEach((t) => {
+      const box = t.nextElementSibling as HTMLElement | null
+      if (!box?.classList.contains('group-box')) return
+      const titleHit = !needle || (t.textContent ?? '').toLowerCase().includes(needle)
+      let any = titleHit
+      box.querySelectorAll('.row').forEach((row) => {
+        const ok = titleHit || !needle || (row.textContent ?? '').toLowerCase().includes(needle)
+        ;(row as HTMLElement).hidden = !ok
+        if (ok) any = true
+      })
+      ;(t as HTMLElement).hidden = !any
+      box.hidden = !any
+    })
+  }, [q, s, cache, info])
   const clear = async (what: 'previews' | 'all') => {
     setBusy(true)
     setCache(await api.clearCache(what))
@@ -163,6 +182,13 @@ function SettingsSheet() {
       <div className="sheet" style={{ width: 600 }}>
         <h2>Settings</h2>
         <p className="lead">Photos {info?.version ?? ''}</p>
+        <input
+          className="text-input settings-search"
+          placeholder="Search settings"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          autoFocus
+        />
 
         <div className="group-title">Appearance</div>
         <div className="group-box">
@@ -182,6 +208,11 @@ function SettingsSheet() {
         <div className="group-box">
           <Row label="Square Thumbnails" sub="Off shows the full aspect ratio of each photo." k="squareThumbs" />
           <Row label="Show Live Photo & Video Badges" k="showLiveBadges" />
+          <Row label="Show Info Overlays" sub="Duration, Live Photo and HDR badges on thumbnails and in the viewer." k="showInfoOverlays" />
+          <div className="row">
+            <div className="rl">Double-Click<small>Opens the viewer, or jumps straight into Edit.</small></div>
+            <Segmented small value={s.doubleClick ?? 'view'} onChange={(v) => updateSettings({ doubleClick: v })} options={[{ value: 'view', label: 'View' }, { value: 'edit', label: 'Edit' }]} />
+          </div>
           <Row label="Lock Hidden Album" sub={`Requires ${api.platform === 'darwin' ? 'Touch ID' : 'Windows Hello'} to view hidden items. Locks again when you leave.`} k="hiddenLocked" />
           <Row label="Confirm Before Deleting" sub="Asks before moving items to Recently Deleted." k="confirmDelete" />
         </div>
@@ -245,6 +276,14 @@ function SettingsSheet() {
             <div className="rl">Cache<small>{cache === null ? 'Measuring…' : `${formatBytes(cache)} of thumbnails, previews and converted video. Originals are never touched.`}</small></div>
             <button className="btn" disabled={busy} onClick={() => clear('previews')}>Clear Previews</button>
             <button className="btn" disabled={busy} onClick={() => clear('all')}>Rebuild All</button>
+          </div>
+          <div className="row">
+            <div className="rl">Reset Settings<small>Restores appearance, playback and sharing defaults. Share connections are kept.</small></div>
+            <button className="btn" onClick={async () => {
+              const next = await api.resetSettings()
+              setState({ settings: next, zoom: next.zoom, view: next.libraryView, sidebarCollapsed: next.sidebarCollapsed })
+              toast('Settings restored')
+            }}>Reset</button>
           </div>
         </div>
 
@@ -524,7 +563,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
     ['A · F · C · P · V', 'Adjust · Filters · Crop · Portrait · Video'], ['Click photo (Portrait)', 'Set focus'], ['E', 'Auto Enhance'],
     ['M (hold)', 'Compare'], [`${mod}Z · ${mod}Shift+Z`, 'Undo · redo'], ['Enter · Esc', 'Done · cancel']
   ]],
-  ['Sharing', [['Drag items out', 'Drop into Explorer, chats or any app'], ['Drag onto an album', 'Add to album']]],
+  ['Sharing', [[`${mod}Shift+S`, 'Share'], ['Drag items out', 'Drop into Explorer, chats or any app'], ['Drag onto an album', 'Add to album']]],
   ['Export', [[`${mod}Shift+E`, 'Export'], [`${mod}Alt+Shift+E`, 'Export unmodified original']]]
 ]
 

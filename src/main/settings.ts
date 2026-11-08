@@ -32,6 +32,9 @@ export interface Settings {
   // Advanced
   reduceMotion: boolean
   backgroundThumbs: boolean
+  lastSource: string
+  /** Double-click a thumbnail: open the viewer, or jump straight into Edit. */
+  doubleClick: 'view' | 'edit'
 }
 
 export const DEFAULTS: Settings = {
@@ -60,7 +63,9 @@ export const DEFAULTS: Settings = {
   volume: 1,
   slideshowSeconds: 3,
   reduceMotion: false,
-  backgroundThumbs: true
+  backgroundThumbs: true,
+  lastSource: 'library',
+  doubleClick: 'view'
 }
 
 let file = ''
@@ -85,5 +90,14 @@ export function setSettings(patch: Partial<Settings>): Settings {
   try {
     writeFileSync(file, JSON.stringify(current, null, 2))
   } catch { /* read-only location */ }
+  return current
+}
+
+export function resetSettings(): Settings {
+  const keep = { lastSource: current.lastSource, shareConnections: current.shareConnections }
+  current = { ...DEFAULTS, ...keep }
+  try {
+    writeFileSync(file, JSON.stringify(current, null, 2))
+  } catch { /* ignore */ }
   return current
 }

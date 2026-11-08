@@ -49,6 +49,8 @@ const api = {
   startImport: (sources: { folders?: string[]; files?: string[] }, copy: boolean) => invoke('import:start', sources, copy),
   getSettings: () => invoke('settings:get'),
   setSettings: (patch: Record<string, unknown>) => invoke('settings:set', patch),
+  resetSettings: () => invoke('settings:reset'),
+  setWallpaper: (id: number) => invoke('asset:wallpaper', id),
   info: () => invoke('app:info'),
   pathForFile: (f: File) => webUtils.getPathForFile(f),
   win: {

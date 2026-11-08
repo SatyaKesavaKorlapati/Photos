@@ -111,6 +111,8 @@ export interface Settings {
   slideshowSeconds: number
   reduceMotion: boolean
   backgroundThumbs: boolean
+  lastSource: string
+  doubleClick: 'view' | 'edit'
 }
 
 export type ConnectionKind = 'system' | 'blip' | 'whatsapp' | 'clipboard' | 'app' | 'folder'

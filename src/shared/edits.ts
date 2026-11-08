@@ -34,7 +34,13 @@ export interface EditRecipe {
 export const PORTRAIT_APERTURES = [1.4, 1.8, 2, 2.2, 2.8, 3.5, 4, 4.5, 5.6, 6.3, 7.1, 8, 9, 10, 11, 13, 14, 16]
 
 /** Blur strength 0…1 for an ƒ-number, matching how the iPhone's Depth slider feels. */
-export const portraitStrength = (f: number): number => Math.max(0, Math.min(1, Math.sqrt((16 / f - 1) / (16 / 1.4 - 1))))
+export const portraitStrength = (f: number): number => Math.max(0, Math.min(1, Math.sqrt((16 / Math.max(1.4, f) - 1) / (16 / 1.4 - 1))))
+
+/** Inverse of portraitStrength: 1 → ƒ1.4, 0 → ƒ16. */
+export const apertureFromStrength = (s: number): number => {
+  const t = Math.max(0, Math.min(1, s))
+  return 16 / (1 + t * t * (16 / 1.4 - 1))
+}
 
 export const ADJUST_GROUPS: { title: string; keys: { key: AdjustKey; label: string; min: number }[] }[] = [
   {

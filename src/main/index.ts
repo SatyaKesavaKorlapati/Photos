@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, type MenuItemConstructorOptions } from 'electron'
-import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { copyFile, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { openDb, getDb } from './db'
@@ -9,8 +10,8 @@ import {
   addToAlbum, assetDetail, createAlbum, deleteAlbum, listAlbums, listAssets, listFolders, listImports, moveAlbum, purgeAssets,
   removeFromAlbum, renameAlbum, setText, sidebarCounts, suggest, updateAssets
 } from './queries'
-import { backgroundProgress, cachePath, displayPath, ensurePreview, getRenderRow, onThumbnailDone, runBackgroundThumbs, setCacheRoot } from './render'
-import { getSettings, loadSettings, setSettings, type Settings } from './settings'
+import { backgroundProgress, cachePath, displayPath, ensureFull, ensurePreview, getRenderRow, onThumbnailDone, runBackgroundThumbs, setCacheRoot } from './render'
+import { getSettings, loadSettings, resetSettings, setSettings, type Settings } from './settings'
 import { getEdit, revertEdit, saveEdit, setRendersDir } from './editRender'
 import { runExport, type ExportOptions } from './exporter'
 import { systemAuth, systemAuthAvailable } from './auth'
@@ -20,13 +21,38 @@ import { connections, destinations, prepareFiles, saveConnections, shareFiles, t
 import { ensureDepth } from './depth'
 
 app.setName('Photos')
+if (process.platform === 'win32') app.setAppUserModelId('com.satyakesava.photos')
 registerSchemes()
 if (!app.requestSingleInstanceLock()) app.quit()
-app.on('second-instance', () => {
+app.on('second-instance', (_e, argv) => {
   if (!win) return
   if (win.isMinimized()) win.restore()
   win.focus()
+  const files = incomingFiles(argv)
+  if (files.length) send('open:files', files)
 })
+
+const MEDIA_EXT = /\.(jpe?g|heic|heif|png|gif|webp|tif|tiff|dng|avif|mp4|mov|m4v|webm)$/i
+function incomingFiles(argv: string[]): string[] {
+  return argv.slice(1).filter((a) => !a.startsWith('-') && MEDIA_EXT.test(a) && existsSync(a))
+}
+
+async function setWallpaper(id: number): Promise<boolean> {
+  try {
+    const src = await ensureFull(id)
+    const dest = join(app.getPath('userData'), 'wallpaper.jpg')
+    if (src !== dest) await copyFile(src, dest)
+    const quoted = dest.replace(/'/g, "''")
+    await new Promise<void>((res, rej) => {
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class P { [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int a, int b, string c, int d); }'; [P]::SystemParametersInfo(20, 0, '${quoted}', 3)`
+      ], (e) => e ? rej(e) : res())
+    })
+    return true
+  } catch {
+    return false
+  }
+}
 
 interface WinState { x?: number; y?: number; width: number; height: number; maximized?: boolean }
 const winStateFile = (): string => join(app.getPath('userData'), 'window.json')
@@ -120,6 +146,12 @@ function createWindow(): void {
   win.once('ready-to-show', () => {
     if (st.maximized) win?.maximize()
     win?.show()
+    const shotDir = process.env.PHOTOS_SHOT
+    if (shotDir) {
+      setTimeout(() => {
+        win?.webContents.capturePage().then((img) => writeFile(join(shotDir, 'shot.png'), img.toPNG())).catch(() => undefined)
+      }, 1800)
+    }
   })
   win.on('close', saveWinState)
   win.on('maximize', () => send('window:state', { maximized: true }))
@@ -375,6 +407,12 @@ function registerIpc(): void {
     if (patch.backgroundThumbs) kickThumbs()
     return s
   })
+  ipcMain.handle('settings:reset', () => {
+    const s = resetSettings()
+    applyTheme(s)
+    return s
+  })
+  ipcMain.handle('asset:wallpaper', (_e, id: number) => setWallpaper(id))
   ipcMain.handle('app:info', () => ({ platform: process.platform, libraryDir, version: app.getVersion() }))
 
   ipcMain.on('window:minimize', () => win?.minimize())
@@ -394,6 +432,8 @@ app.whenReady().then(async () => {
   registerIpc()
   buildMenu()
   createWindow()
+  const launched = incomingFiles(process.argv)
+  if (launched.length) win?.webContents.once('did-finish-load', () => send('open:files', launched))
 
   let thumbTick = 0
   onThumbnailDone(() => {

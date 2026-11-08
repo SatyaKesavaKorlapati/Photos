@@ -9,14 +9,21 @@ import { invalidateDetail, useDetail } from '../components/InfoPanel'
 import { TrafficLights } from '../components/TitleBar'
 import { formatDuration } from '../util'
 import {
-  ADJUST_GROUPS, ASPECTS, FILTERS, PORTRAIT_APERTURES, emptyRecipe, isIdentity, orientedSize, outputSize,
+  ADJUST_GROUPS, ASPECTS, FILTERS, PORTRAIT_APERTURES, apertureFromStrength, emptyRecipe, isIdentity, orientedSize, outputSize, portraitStrength,
   type AdjustKey, type CropRect, type EditRecipe, type FilterName
 } from '../../../shared/edits'
 import { autoEnhance, EditRenderer, sourceMap } from './gl'
 
 type Tab = 'adjust' | 'filters' | 'crop' | 'video' | 'portrait'
 
-interface DepthMap { width: number; height: number; focus: number; matte: boolean; px: Uint8ClampedArray }
+interface DepthMap {
+  width: number
+  height: number
+  focus: number
+  matte: boolean
+  px: Uint8ClampedArray
+  subjects?: { x: number; y: number; w: number; h: number; focus: number }[]
+}
 
 /** Disparity under a source-uv point, averaged over a small window so a click lands on the surface, not noise. */
 function depthAt(m: DepthMap, u: number, v: number): number {
@@ -558,7 +565,8 @@ export function Editor() {
     ...(depth ? [{ value: 'portrait' as Tab, label: 'Portrait' }] : []),
     ...(isVideo ? [{ value: 'video' as Tab, label: 'Video' }] : [])
   ]
-  const apIndex = pt ? PORTRAIT_APERTURES.reduce((best, f, i) => (Math.abs(f - pt.aperture) < Math.abs(PORTRAIT_APERTURES[best] - pt.aperture) ? i : best), 0) : 0
+  const apStrength = pt ? portraitStrength(pt.aperture) : 0
+  const fmtF = (f: number) => `ƒ${f < 10 ? f.toFixed(1) : f.toFixed(0)}`
 
   return (
     <div className="editor" onMouseDown={(e) => e.stopPropagation()}>
@@ -601,6 +609,23 @@ export function Editor() {
             onPointerDown={pickFocus}
           >
             <canvas ref={canvasRef} style={{ width: dispW, height: dispH, opacity: ready ? 1 : 0 }} />
+            {tab === 'portrait' && depth?.subjects?.filter((s) => {
+              const a = s.w * s.h
+              return a > 0.002 && a < 0.5
+            }).slice(0, 5).map((s, i) => (
+              <button
+                key={i}
+                className={`pt-subject${Math.abs((pt?.focus ?? depth.focus) - s.focus) < 0.045 ? ' on' : ''}`}
+                style={{ left: (s.x + s.w / 2) * dispW, top: (s.y + s.h / 2) * dispH }}
+                title="Focus on this subject"
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  setFocusMark({ x: (s.x + s.w / 2) * dispW, y: (s.y + s.h / 2) * dispH, k: Date.now() })
+                  setPortrait({ focus: s.focus, on: true })
+                }}
+              />
+            ))}
             {tab === 'portrait' && focusMark && <div key={focusMark.k} className="focus-mark" style={{ left: focusMark.x, top: focusMark.y }} />}
             {cropping && recipe && ready && (
               <CropOverlay
@@ -795,22 +820,21 @@ export function Editor() {
                 <button className={`pt-pill${pt.on ? ' on' : ''}`} onClick={() => setPortrait({ on: !pt.on })}>Portrait</button>
               </div>
               <div className={`pt-dial${pt.on ? '' : ' off'}`}>
-                <span className="pt-f">ƒ{pt.aperture < 10 ? pt.aperture.toFixed(1) : pt.aperture.toFixed(0)}</span>
+                <span className="pt-f">{fmtF(pt.aperture)}</span>
                 <span className="pt-label">Depth</span>
               </div>
               <Slider
                 className="pt-slider"
                 min={0}
-                max={PORTRAIT_APERTURES.length - 1}
-                step={1}
-                value={apIndex}
-                reset={PORTRAIT_APERTURES.indexOf(4.5)}
-                onChange={(i) => setPortrait({ aperture: PORTRAIT_APERTURES[i], on: true }, false)}
+                max={1}
+                reset={1 - portraitStrength(4.5)}
+                value={1 - apStrength}
+                onChange={(v) => setPortrait({ aperture: apertureFromStrength(1 - v), on: true }, false)}
                 onCommit={commitNow}
               />
               <div className="pt-ticks">
-                {PORTRAIT_APERTURES.map((f, i) => (
-                  <span key={f} className={i === apIndex ? 'on' : [0, 4, 8, 11, 17].includes(i) ? 'major' : ''}>{[0, 4, 8, 11, 17].includes(i) ? f : ''}</span>
+                {PORTRAIT_APERTURES.filter((f) => [1.4, 2.8, 5.6, 8, 16].includes(f)).map((f) => (
+                  <span key={f} className={Math.abs(f - pt.aperture) < 0.35 ? 'on' : 'major'} style={{ left: `${(1 - portraitStrength(f)) * 100}%` }}>{f}</span>
                 ))}
               </div>
               <div className="pt-ends"><span>More blur</span><span>Less blur</span></div>

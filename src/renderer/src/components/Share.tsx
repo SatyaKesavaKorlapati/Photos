@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronRight, Copy, Download, FolderOpen, Images, Link2, MessageCircle, Plus, Settings2, Share, Play, AppWindow, Send } from 'lucide-react'
+import { ChevronRight, Copy, Download, FolderOpen, Images, Link2, Plus, Settings2, Share, Play, AppWindow, Send } from 'lucide-react'
+import blipIcon from '../assets/blip.png'
+import whatsappIcon from '../assets/whatsapp.png'
 import { api, thumbUrl } from '../api'
 import { albumSubmenu, exportAssets, slideshow } from '../actions'
 import { getState, setState, toast, updateSettings, useStore } from '../store'
@@ -23,10 +25,11 @@ const HUES = [212, 145, 280, 25, 330, 190, 48]
 const hue = (s: string) => HUES[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % HUES.length]
 
 function AppIcon({ d }: { d: ShareDestination }) {
-  if (d.icon && d.kind !== 'blip') return <img src={d.icon} draggable={false} />
+  if (d.kind === 'whatsapp') return <img src={whatsappIcon} draggable={false} alt="" />
+  if (d.kind === 'blip' && !d.peer) return <img src={blipIcon} draggable={false} alt="" />
+  if (d.icon) return <img src={d.icon} draggable={false} alt="" />
   switch (d.kind) {
     case 'system': return <span className="sh-glyph system"><Share size={24} /></span>
-    case 'whatsapp': return <span className="sh-glyph whatsapp"><MessageCircle size={26} fill="currentColor" strokeWidth={1.4} /></span>
     case 'blip': return <span className="sh-glyph blip"><Send size={22} /></span>
     case 'clipboard': return <span className="sh-glyph copy"><Copy size={22} /></span>
     case 'folder': return <span className="sh-glyph folder"><FolderOpen size={24} /></span>

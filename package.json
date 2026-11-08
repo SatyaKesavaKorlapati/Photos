@@ -24,11 +24,23 @@
     "files": ["out/**/*", "build/icon.png", "package.json"],
     "asarUnpack": ["node_modules/@ffmpeg-installer/**", "node_modules/ffprobe-static/**", "node_modules/sharp/**", "node_modules/@img/**"],
     "win": {
-      "target": ["nsis"],
+      "target": ["nsis", "portable"],
       "icon": "build/icon.ico",
-      "extraResources": [{ "from": "vendor/ffmpeg", "to": "ffmpeg", "filter": ["ffmpeg.exe", "ffprobe.exe"] }]
+      "extraResources": [{ "from": "vendor/ffmpeg", "to": "ffmpeg", "filter": ["ffmpeg.exe", "ffprobe.exe"] }],
+      "fileAssociations": [
+        { "ext": ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tif", "tiff", "dng", "avif"], "name": "Photo", "description": "Photo", "role": "Viewer" },
+        { "ext": ["mp4", "mov", "m4v", "webm"], "name": "Video", "description": "Video", "role": "Viewer" }
+      ]
     },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Photos",
+      "uninstallDisplayName": "Photos"
+    },
+    "portable": { "artifactName": "Photos.exe" },
     "mac": { "target": ["dmg"], "icon": "build/icon.png", "category": "public.app-category.photography" }
   },
   "devDependencies": {

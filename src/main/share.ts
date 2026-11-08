@@ -117,7 +117,10 @@ export async function destinations(): Promise<ShareDestination[]> {
         break
       }
       case 'whatsapp':
-        out.push({ id: c.id, connection: c.id, kind: c.kind, title: 'WhatsApp', subtitle: whatsappInstalled() ? 'Opens WhatsApp — paste into a chat' : 'Opens WhatsApp Web — paste into a chat' })
+        out.push({
+          id: c.id, connection: c.id, kind: c.kind, title: 'WhatsApp',
+          subtitle: whatsappInstalled() ? 'Choose a chat in WhatsApp' : 'Opens WhatsApp Web — pick a chat and paste'
+        })
         break
       case 'clipboard':
         out.push({ id: c.id, connection: c.id, kind: c.kind, title: 'Copy Files', subtitle: 'Paste into any app' })
@@ -235,7 +238,71 @@ public static class PhotosShare {
   [DllImport("user32.dll")] public static extern IntPtr SetWindowLongPtr(IntPtr h, int i, IntPtr v);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr extra);
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
   public struct RECT { public int L, T, R, B; }
+
+  static IntPtr FindWhatsAppWindow() {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      var sb = new System.Text.StringBuilder(512);
+      GetWindowText(h, sb, 512);
+      var t = sb.ToString();
+      if (t.IndexOf("WhatsApp", StringComparison.OrdinalIgnoreCase) < 0) return true;
+      if (t.IndexOf("Photos", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+      found = h;
+      return false;
+    }, IntPtr.Zero);
+    if (found != IntPtr.Zero) return found;
+    foreach (var p in System.Diagnostics.Process.GetProcesses()) {
+      try {
+        if (p.MainWindowHandle == IntPtr.Zero) continue;
+        if (p.ProcessName.IndexOf("WhatsApp", StringComparison.OrdinalIgnoreCase) >= 0) return p.MainWindowHandle;
+      } catch {}
+    }
+    return IntPtr.Zero;
+  }
+
+  static void Paste() {
+    const byte VK_CONTROL = 0x11, VK_V = 0x56; const uint KEYUP = 2;
+    keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
+    keybd_event(VK_V, 0, 0, UIntPtr.Zero);
+    keybd_event(VK_V, 0, KEYUP, UIntPtr.Zero);
+    keybd_event(VK_CONTROL, 0, KEYUP, UIntPtr.Zero);
+  }
+
+  /** Starts WhatsApp and pastes the file list so its attach/send UI opens, like the iOS share sheet. */
+  public static bool OpenAndPaste(string uri, int waitMs) {
+    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = uri, UseShellExecute = true }); } catch {}
+    if (uri.IndexOf("http", StringComparison.OrdinalIgnoreCase) < 0) {
+      try {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+          FileName = "explorer.exe",
+          Arguments = @"shell:AppsFolder\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App",
+          UseShellExecute = true
+        });
+      } catch {}
+    }
+    var t0 = Environment.TickCount;
+    IntPtr hwnd = IntPtr.Zero;
+    while (Environment.TickCount - t0 < waitMs) {
+      hwnd = FindWhatsAppWindow();
+      if (hwnd != IntPtr.Zero) break;
+      System.Threading.Thread.Sleep(250);
+    }
+    if (hwnd == IntPtr.Zero) return false;
+    SetForegroundWindow(hwnd);
+    System.Threading.Thread.Sleep(500);
+    Paste();
+    System.Threading.Thread.Sleep(700);
+    SetForegroundWindow(hwnd);
+    Paste();
+    return true;
+  }
 
   static IDataTransferManagerInterop Factory() {
     const string name = "Windows.ApplicationModel.DataTransfer.DataTransferManager";
@@ -280,6 +347,15 @@ public static class PhotosShare {
   }
 }
 '@
+if ($mode -eq 'whatsapp') {
+  Set-Clipboard -LiteralPath $paths
+  if ($env:PHOTOS_SHARE_WHATSAPP -eq 'web') {
+    if ([PhotosShare]::OpenAndPaste('https://web.whatsapp.com/', 16000)) { 'picker' } else { 'web' }
+  } else {
+    if ([PhotosShare]::OpenAndPaste('whatsapp:', 14000)) { 'picker' } else { 'opened' }
+  }
+  exit 0
+}
 if ($mode -eq 'blip') { [PhotosShare]::Blip([string[]]$paths, $env:PHOTOS_SHARE_PEER); Start-Sleep -Milliseconds 800; exit 0 }
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -389,14 +465,24 @@ export async function shareFiles(files: string[], destId: string, win: BrowserWi
       if (/picker/.test(out)) return { ok: true, message: 'Choose who to send to in Blip' }
       return { ok: false, message: 'Blip could not be reached. Is it running?' }
     }
-    case 'whatsapp':
     case 'clipboard': {
       const out = await withList(files, (list) => runShareScript({ PHOTOS_SHARE_MODE: 'clip', PHOTOS_SHARE_LIST: list }, (l) => l.trim() === 'ok'))
       if (!/ok/.test(out)) return { ok: false, message: 'Could not copy the files' }
-      if (d.kind === 'clipboard') return { ok: true, message: `${files.length} file${files.length === 1 ? '' : 's'} copied — paste anywhere` }
-      if (whatsappInstalled()) await shell.openExternal('whatsapp://')
-      else await shell.openExternal('https://web.whatsapp.com/')
-      return { ok: true, message: 'Copied — open a chat in WhatsApp and press Ctrl+V' }
+      return { ok: true, message: `${files.length} file${files.length === 1 ? '' : 's'} copied — paste anywhere` }
+    }
+    case 'whatsapp': {
+      const web = !whatsappInstalled()
+      const out = await withList(files, (list) =>
+        runShareScript(
+          { PHOTOS_SHARE_MODE: 'whatsapp', PHOTOS_SHARE_LIST: list, PHOTOS_SHARE_WHATSAPP: web ? 'web' : 'app' },
+          (l) => /^(picker|opened|web)$/.test(l.trim()),
+          18000
+        )
+      )
+      if (/picker/.test(out)) return { ok: true, message: 'Choose a chat in WhatsApp' }
+      if (/web/.test(out)) return { ok: true, message: 'Pick a chat in WhatsApp Web, then press Ctrl+V' }
+      if (/opened/.test(out)) return { ok: true, message: 'WhatsApp is open — pick a chat and press Ctrl+V' }
+      return { ok: false, message: 'Could not open WhatsApp' }
     }
     case 'app': {
       if (!c?.path) return { ok: false, message: 'App not found' }

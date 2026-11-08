@@ -45,6 +45,8 @@ interface Api {
   startImport(sources: { folders?: string[]; files?: string[] }, copy: boolean): Promise<number>
   getSettings(): Promise<Settings>
   setSettings(patch: Partial<Settings>): Promise<Settings>
+  resetSettings(): Promise<Settings>
+  setWallpaper(id: number): Promise<boolean>
   info(): Promise<{ platform: string; libraryDir: string; version: string }>
   pathForFile(f: File): string
   win: { minimize(): void; maximize(): void; fullscreen(on?: boolean): void; isFullscreen(): Promise<boolean>; close(): void }
@@ -56,6 +58,7 @@ interface Api {
   on(channel: 'thumbs:progress', fn: (p: ThumbProgress) => void): () => void
   on(channel: 'window:state', fn: (p: { maximized?: boolean; fullscreen?: boolean }) => void): () => void
   on(channel: 'menu:command', fn: (cmd: string) => void): () => void
+  on(channel: 'open:files', fn: (files: string[]) => void): () => void
 }
 
 declare global {

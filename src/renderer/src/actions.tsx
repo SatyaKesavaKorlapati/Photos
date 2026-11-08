@@ -1,6 +1,6 @@
 import {
   Copy, Download, EyeOff, Eye, FolderOpen, Heart, HeartOff, Info, ExternalLink, Plus, RotateCcw, Trash2, Undo2, Images, FolderPlus, MinusCircle,
-  SlidersHorizontal, Play, Share
+  SlidersHorizontal, Play, Share, Monitor
 } from 'lucide-react'
 import { api, fileManager, isMac, mod } from './api'
 import { confirmSheet, getState, patchAssets, refreshAll, setState, toast, type MenuItem } from './store'
@@ -219,6 +219,7 @@ export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: b
     },
     { label: `Show in ${fileManager}`, icon: <FolderOpen size={14} />, onClick: () => showInFolder(ids[0]), disabled: !one },
     { label: 'Open With Default App', icon: <ExternalLink size={14} />, onClick: () => openWithDefault(ids[0]), disabled: !one },
+    { label: 'Set as Desktop Background', icon: <Monitor size={14} />, disabled: !one || list[0]?.video, onClick: () => api.setWallpaper(ids[0]).then((ok) => toast(ok ? 'Desktop background updated' : 'Couldn’t set the desktop background')) },
     { separator: true },
     { label: 'Play Slideshow', icon: <Play size={14} />, onClick: runSlideshow },
     inHidden

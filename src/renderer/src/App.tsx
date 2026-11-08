@@ -176,7 +176,7 @@ export default function App() {
 
   useEffect(() => {
     api.getSettings().then((s) => {
-      setState({ settings: s, zoom: s.zoom, view: s.libraryView, sidebarCollapsed: s.sidebarCollapsed })
+      setState({ settings: s, zoom: s.zoom, view: s.libraryView, sidebarCollapsed: s.sidebarCollapsed, source: s.lastSource || 'library' })
       refreshAll()
     })
     api.win.isFullscreen().then((f) => setState({ fullscreen: f }))
@@ -196,7 +196,8 @@ export default function App() {
         if (p.maximized !== undefined) setState({ maximized: p.maximized })
         if (p.fullscreen !== undefined) setState({ fullscreen: p.fullscreen })
       }),
-      api.on('menu:command', (c) => runCommand(c))
+      api.on('menu:command', (c) => runCommand(c)),
+      api.on('open:files', (files: string[]) => setState({ sheet: { kind: 'import', files } }))
     ]
     // Leaving the app re-locks the Hidden album, like iOS.
     const onBlur = () => {
@@ -250,6 +251,11 @@ export default function App() {
         e.preventDefault()
         runCommand(e.altKey ? 'export-original' : 'export')
       }
+      if (ctrl && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        const ids = [...getState().selection]
+        if (ids.length) openShare(ids)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -282,9 +288,11 @@ export default function App() {
           setState({ sheet: { kind: 'import', folders: folders.length ? folders : undefined, files: files.length ? files : undefined } })
         }}
       >
-        {!collapsed && <Sidebar />}
+        <div className={`sb-slot${collapsed ? ' closed' : ''}`} aria-hidden={collapsed}>
+          <Sidebar />
+        </div>
         <main className="main">
-          <section className="content glass" onMouseDown={() => getState().menu && setState({ menu: null })}>
+          <section className="content" onMouseDown={() => getState().menu && setState({ menu: null })}>
             <Content onRange={setRange} range={range} />
             <Toolbar visibleRange={range} />
             <SelectBar />

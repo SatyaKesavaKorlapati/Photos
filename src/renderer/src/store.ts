@@ -200,6 +200,7 @@ export function navigate(source: string, opts: { view?: LibraryView; scrollTo?: 
     filter: source === state.source ? state.filter : 'all',
     albumParent: source === 'albums' ? state.albumParent : null
   })
+  if (source !== 'hidden' && source !== 'deleted') updateSettings({ lastSource: source })
   loadAssets(source)
 }
 

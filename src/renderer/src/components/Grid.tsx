@@ -10,6 +10,13 @@ import { LiveIcon } from './Icons'
 import { openMenu } from './Menu'
 
 const SIZES = [440, 330, 260, 210, 170, 136, 108, 82, 58]
+const sizeAt = (zoom: number): number => {
+  const z = Math.max(1, Math.min(9, zoom))
+  const i = Math.min(SIZES.length - 1, Math.max(0, Math.floor(z) - 1))
+  const t = z - Math.floor(z)
+  if (t < 1e-4 || i >= SIZES.length - 1) return SIZES[i]
+  return SIZES[i] * (1 - t) + SIZES[i + 1] * t
+}
 const GAP = 2
 /** Room for the floating toolbar; the grid scrolls underneath it. */
 export const GRID_TOP = 62
@@ -291,7 +298,7 @@ export function PhotoGrid({
     return () => ro.disconnect()
   }, [])
 
-  const cols = Math.max(1, Math.round((width + GAP) / (SIZES[zoom - 1] + GAP)))
+  const cols = Math.max(1, Math.round((width + GAP) / (sizeAt(zoom) + GAP)))
   const cell = width ? (width - GAP * (cols - 1)) / cols : 0
   const rows = Math.ceil(items.length / cols)
 
@@ -477,6 +484,10 @@ export function PhotoGrid({
   const onOpen = useCallback(
     (e: React.MouseEvent, a: GridAsset) => {
       if (getState().selectMode) return
+      if (getState().settings?.doubleClick === 'edit') {
+        openEditor(a.id)
+        return
+      }
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
       openViewer(items.map((x) => x.id), a.id, getState().source, rect)
     },
@@ -509,7 +520,7 @@ export function PhotoGrid({
       acc += e.deltaY
       if (Math.abs(acc) > 40) {
         const z = getState().zoom
-        setState({ zoom: Math.max(1, Math.min(9, z + (acc > 0 ? 1 : -1))) })
+        setState({ zoom: Math.max(1, Math.min(9, z + (acc > 0 ? 0.35 : -0.35))) })
         acc = 0
       }
     }
@@ -579,7 +590,7 @@ export function PhotoGrid({
   }, [items, indexOf, cols, viewerOpen, sheetOpen])
 
   const fit = settings ? !settings.squareThumbs : false
-  const badges = settings?.showLiveBadges ?? true
+  const badges = (settings?.showLiveBadges ?? true) && (settings?.showInfoOverlays !== false)
   const autoplayLive = settings?.autoplayLive ?? true
 
   return (

@@ -304,11 +304,9 @@ export function SidebarPeek() {
   return (
     <>
       <div className="edge-zone" onMouseEnter={show} onMouseLeave={() => !peek && cancel()} />
-      {peek && (
-        <div className="peek-wrap" ref={wrap} onMouseEnter={cancel}>
-          <Sidebar peek onLeave={() => !busy && hide()} />
-        </div>
-      )}
+      <div className={`peek-wrap${peek ? ' open' : ''}`} ref={wrap} onMouseEnter={cancel}>
+        <Sidebar peek onLeave={() => !busy && hide()} />
+      </div>
     </>
   )
 }

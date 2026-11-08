@@ -229,10 +229,9 @@ export function Toolbar({ visibleRange }: { visibleRange: [number, number] | nul
             title="Thumbnail size"
             min={1}
             max={9}
-            step={1}
             value={10 - zoom}
             onChange={(v) => setState({ zoom: 10 - v })}
-            onCommit={() => updateSettings({ zoom: getState().zoom })}
+            onCommit={(v) => updateSettings({ zoom: 10 - v })}
           />
           <button className="no-drag" onClick={() => setState({ zoom: Math.max(1, zoom - 1) })} title="Zoom In"><Plus size={13} /></button>
         </div>

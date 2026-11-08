@@ -29,7 +29,7 @@ float coc(vec2 uv) {
   vec2 dm = texture(u_depth, uv).rg;
   float d = u_focus - dm.r;
   float c = d > 0.0 ? smoothstep(0.015, 0.32, d) : 0.8 * smoothstep(0.05, 0.4, -d);
-  return c * (1.0 - smoothstep(0.35, 0.9, dm.g));
+  return c * (1.0 - smoothstep(0.12, 0.55, dm.g));
 }
 
 // Golden-angle disc gather. Each tap only counts if its own blur reaches this pixel, so the sharp

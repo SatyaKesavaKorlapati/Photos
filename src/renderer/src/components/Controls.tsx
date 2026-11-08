@@ -67,13 +67,13 @@ export function Slider({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState(false)
-  const clampStep = (v: number) => {
+  const clampTo = (v: number, snap: boolean) => {
     const c = Math.max(min, Math.min(max, v))
-    return step ? Math.round((c - min) / step) * step + min : c
+    return snap && step ? Math.round((c - min) / step) * step + min : c
   }
-  const at = (clientX: number) => {
+  const at = (clientX: number, snap = false) => {
     const r = ref.current!.getBoundingClientRect()
-    return clampStep(min + ((clientX - r.left) / r.width) * (max - min))
+    return clampTo(min + ((clientX - r.left) / r.width) * (max - min), snap)
   }
   const pct = max > min ? ((Math.max(min, Math.min(max, value)) - min) / (max - min)) * 100 : 0
   const zero = min < 0 && max > 0 ? (-min / (max - min)) * 100 : 0
@@ -97,10 +97,12 @@ export function Slider({
           const v = at(ev.clientX)
           if (v !== last) onChange((last = v))
         }
-        const up = () => {
+        const up = (ev: PointerEvent) => {
           window.removeEventListener('pointermove', move)
           window.removeEventListener('pointerup', up)
           window.removeEventListener('pointercancel', up)
+          last = clampTo(at(ev.clientX), true)
+          onChange(last)
           setDrag(false)
           onCommit?.(last)
         }
@@ -119,7 +121,7 @@ export function Slider({
         if (k !== 'ArrowLeft' && k !== 'ArrowRight' && k !== 'ArrowUp' && k !== 'ArrowDown' && k !== 'Home' && k !== 'End') return
         e.preventDefault()
         e.stopPropagation()
-        const v = k === 'Home' ? min : k === 'End' ? max : clampStep(value + (k === 'ArrowRight' || k === 'ArrowUp' ? d : -d))
+        const v = k === 'Home' ? min : k === 'End' ? max : clampTo(value + (k === 'ArrowRight' || k === 'ArrowUp' ? d : -d), true)
         onChange(v)
         onCommit?.(v)
       }}
@@ -257,8 +259,8 @@ export function AdjustSlider({
   const set = (clientX: number) => {
     const r = ref.current!.getBoundingClientRect()
     let v = min + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * (1 - min)
-    if (Math.abs(v) < 0.025) v = 0
-    onChange(Math.round(v * 100) / 100)
+    if (Math.abs(v) < 0.012) v = 0
+    onChange(v)
   }
   return (
     <div className={`adj${disabled ? ' disabled' : ''}${value !== 0 ? ' changed' : ''}`} onDoubleClick={() => { onChange(0); onCommit?.() }}>
