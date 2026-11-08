@@ -1,4 +1,5 @@
 import { parentPort } from 'node:worker_threads'
+import { spawn } from 'node:child_process'
 import { readFile, mkdir } from 'node:fs/promises'
 import { dirname, extname } from 'node:path'
 import sharp from 'sharp'
@@ -16,6 +17,7 @@ export interface ImageJob {
   preview?: string
   previewSize: number
   full?: string
+  ffmpeg?: string
 }
 
 const HEIF_COLORSPACE_RGB = 1
@@ -108,12 +110,42 @@ function attachIcc(jpeg: Buffer, icc: Buffer): Buffer<ArrayBufferLike> {
   return Buffer.concat([jpeg.subarray(0, 2), seg, jpeg.subarray(2)])
 }
 
-async function openImage(src: string): Promise<{ img: Sharp; width: number; height: number; icc?: Buffer }> {
+/** Full HEIC decode through ffmpeg as an uncompressed PAM stream (orientation applied). */
+function ffmpegDecode(ffmpegPath: string, src: string): Promise<{ data: Buffer; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const p = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-i', src, '-frames:v', '1', '-c:v', 'pam', '-pix_fmt', 'rgb24', '-f', 'image2pipe', '-'], {
+      windowsHide: true
+    })
+    const chunks: Buffer[] = []
+    p.stdout.on('data', (d: Buffer) => chunks.push(d))
+    p.on('error', reject)
+    p.on('close', (code) => {
+      const out = Buffer.concat(chunks)
+      const end = out.indexOf('ENDHDR\n')
+      if (code !== 0 || end < 0) return reject(new Error(`ffmpeg decode failed (${code})`))
+      const head = out.subarray(0, end).toString('latin1')
+      const width = Number(/WIDTH (\d+)/.exec(head)?.[1])
+      const height = Number(/HEIGHT (\d+)/.exec(head)?.[1])
+      const data = out.subarray(end + 7)
+      if (!width || !height || data.length < width * height * 3) return reject(new Error('short ffmpeg decode'))
+      resolve({ data, width, height })
+    })
+  })
+}
+
+async function openImage(src: string, ffmpegPath?: string): Promise<{ img: Sharp; width: number; height: number; icc?: Buffer }> {
   const ext = extname(src).toLowerCase()
   if (ext === '.heic' || ext === '.heif') {
     const buf = await readFile(src)
+    const icc0 = await heicIcc(buf)
+    if (ffmpegPath) {
+      try {
+        const d = await ffmpegDecode(ffmpegPath, src)
+        return { img: sharp(d.data, { raw: { width: d.width, height: d.height, channels: 3 } }), width: d.width, height: d.height, icc: icc0 }
+      } catch { /* fall back to the wasm decoder */ }
+    }
     const decoded = await decodeHeic({ buffer: buf })
-    const icc = await heicIcc(buf)
+    const icc = icc0
     const img = sharp(Buffer.from(decoded.data.buffer, decoded.data.byteOffset, decoded.data.byteLength), {
       raw: { width: decoded.width, height: decoded.height, channels: 4 }
     })
@@ -168,7 +200,7 @@ parentPort?.on('message', async (job: ImageJob) => {
         return
       }
     }
-    const { img, width, height, icc } = await openImage(job.src)
+    const { img, width, height, icc } = await openImage(job.src, job.ffmpeg)
     if (job.thumb) await writeJpeg(img, job.thumb, job.thumbSize, 82, icc)
     if (job.preview) await writeJpeg(img, job.preview, job.previewSize, 88, icc)
     if (job.full) await writeJpeg(img, job.full, undefined, 93, icc)

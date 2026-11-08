@@ -16,6 +16,8 @@ export interface GridAsset {
   edited: boolean
   hidden: boolean
   name: string
+  /** Timestamp of the in-app edit render, used to bust cached thumbnails; 0 when unedited. */
+  ev: number
 }
 
 const SUBTYPE_SOURCES = new Set([
@@ -24,13 +26,26 @@ const SUBTYPE_SOURCES = new Set([
 ])
 
 const COLS = `id, taken_at AS t, COALESCE(width,0) AS w, COALESCE(height,0) AS h, kind, COALESCE(duration,0) AS dur, favorite,
-  subtypes AS sub, rotation AS rot, live_style, edited_path, aae_path, hidden, name`
+  subtypes AS sub, rotation AS rot, live_style, edited_path, aae_path, hidden, name, user_edit_at, user_render, user_edits`
 
-const toGrid = (r: any): GridAsset => ({
-  id: r.id, t: r.t, w: r.w, h: r.h, video: r.kind === 'video', dur: r.dur, fav: !!r.favorite, sub: r.sub ?? '',
-  rot: r.rot ?? 0, live: (r.sub ?? '').includes('live') ? r.live_style ?? 'live' : null,
-  edited: (r.sub ?? '').includes('edited'), hidden: !!r.hidden, name: r.name
-})
+const editedDims = (r: any): { w: number; h: number } | null => {
+  if (!r.user_render || !r.user_edits) return null
+  try {
+    const d = JSON.parse(r.user_edits).out as { w: number; h: number } | undefined
+    return d?.w && d?.h ? d : null
+  } catch {
+    return null
+  }
+}
+
+const toGrid = (r: any): GridAsset => {
+  const d = editedDims(r)
+  return {
+    id: r.id, t: r.t, w: d?.w ?? r.w, h: d?.h ?? r.h, video: r.kind === 'video', dur: r.dur, fav: !!r.favorite, sub: r.sub ?? '',
+    rot: r.rot ?? 0, live: (r.sub ?? '').includes('live') ? r.live_style ?? 'live' : null,
+    edited: (r.sub ?? '').includes('edited') || !!r.user_render, hidden: !!r.hidden, name: r.name, ev: r.user_render ? r.user_edit_at ?? 0 : 0
+  }
+}
 
 const LIVE = 'deleted_at IS NULL AND hidden = 0'
 const hasSub = (s: string): string => `(',' || subtypes || ',') LIKE '%,${s},%'`
@@ -169,6 +184,8 @@ export function assetDetail(id: number): Record<string, unknown> | undefined {
     file(r.live_path, 'Live Photo Video'),
     file(r.live_edited_path, 'Edited Live Video'),
     file(r.aae_path, 'Adjustments (AAE)'),
+    file(r.user_render, 'Edited in Photos'),
+    file(r.user_live_render, 'Edited Live Video (Photos)'),
     ...sidecars.map((s) => file(s, /\.aae$/i.test(s) ? 'Original Adjustments (AAE)' : 'Sidecar'))
   ].filter(Boolean)
   const albums = getDb()
@@ -177,6 +194,7 @@ export function assetDetail(id: number): Record<string, unknown> | undefined {
   return {
     ...r,
     edits: r.edits ? JSON.parse(r.edits) : null,
+    user_edits: r.user_edits ? JSON.parse(r.user_edits) : null,
     quality: r.quality ? JSON.parse(r.quality) : [],
     tech: r.tech ? JSON.parse(r.tech) : {},
     subtypes: (r.subtypes ?? '').split(',').filter(Boolean),

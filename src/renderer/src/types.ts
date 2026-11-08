@@ -12,7 +12,29 @@ export interface GridAsset {
   edited: boolean
   hidden: boolean
   name: string
+  ev: number
 }
+
+export type PhotoFormat = 'jpeg' | 'png' | 'tiff' | 'heic' | 'avif' | 'webp'
+export type VideoFormat = 'original' | 'h264' | 'hevc' | 'mov' | 'webm' | 'gif'
+
+export interface ExportOptions {
+  unmodified: boolean
+  photoFormat: PhotoFormat
+  quality: number
+  size: 'full' | 'large' | 'medium' | 'small' | 'custom'
+  maxDim?: number
+  colorProfile: 'p3' | 'srgb'
+  includeMetadata: boolean
+  videoFormat: VideoFormat
+  videoQuality: 'original' | '2160' | '1080' | '720' | '480'
+  includeLive: boolean
+  fileName: 'file' | 'title' | 'sequential'
+  prefix?: string
+  subfolder: 'none' | 'day'
+}
+
+export interface ExportProgress { done: number; total: number; current?: string; files: number; bytes: number; skipped?: string[]; dir?: string }
 
 export interface Album {
   id: number
@@ -134,6 +156,8 @@ export interface AssetDetail {
   live_style: string | null
   content_id: string | null
   edits: EditSummary | null
+  user_edits: { recipe: import('../../shared/edits').EditRecipe; out: { w: number; h: number }; at: number } | null
+  user_render: string | null
   quality: string[]
   tech: {
     format?: string

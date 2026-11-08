@@ -1,9 +1,10 @@
 import {
-  Copy, Download, EyeOff, Eye, FolderOpen, Heart, HeartOff, Info, ExternalLink, Plus, RotateCcw, Trash2, Undo2, Images, FolderPlus, MinusCircle
+  Copy, Download, EyeOff, Eye, FolderOpen, Heart, HeartOff, Info, ExternalLink, Plus, RotateCcw, Trash2, Undo2, Images, FolderPlus, MinusCircle,
+  SlidersHorizontal, Play, Share
 } from 'lucide-react'
 import { api, fileManager, isMac, mod } from './api'
-import { getState, patchAssets, refreshAll, setState, toast, type MenuItem } from './store'
-import { formatBytes, plural } from './util'
+import { confirmSheet, getState, patchAssets, refreshAll, setState, toast, type MenuItem } from './store'
+import { plural } from './util'
 
 const word = (ids: number[]): string => {
   const list = getState().assets.filter((a) => ids.includes(a.id))
@@ -23,14 +24,40 @@ export async function toggleFavorite(ids: number[]): Promise<void> {
 export const rotate = (ids: number[], deg = -90): Promise<void> => patchAssets(ids, { rotate: deg })
 
 export async function hide(ids: number[], v = true): Promise<void> {
+  if (!ids.length) return
+  const label = word(ids)
   await patchAssets(ids, { hidden: v })
-  toast(v ? `${word(ids)} hidden` : `${word(ids)} unhidden`)
+  toast(v ? `${label} hidden` : `${label} unhidden`, {
+    label: 'Undo',
+    run: async () => {
+      await api.update(ids, { hidden: !v })
+      refreshAll()
+    }
+  })
 }
 
-export async function trash(ids: number[]): Promise<void> {
+/** Moves to Recently Deleted after an Apple-style confirmation. Resolves false when cancelled. */
+export async function trash(ids: number[]): Promise<boolean> {
+  if (!ids.length) return false
+  const label = word(ids)
+  if (getState().settings?.confirmDelete !== false) {
+    const ok = await confirmSheet({
+      title: `Delete ${label}?`,
+      message: `${ids.length === 1 ? 'This item' : 'These items'} will be moved to Recently Deleted. Files on disk are never touched, and you can recover ${ids.length === 1 ? 'it' : 'them'} at any time.`,
+      confirm: `Delete ${label}`,
+      danger: true
+    })
+    if (!ok) return false
+  }
   await patchAssets(ids, { deleted: true })
-  setState({ selection: new Set() })
-  toast(`${word(ids)} moved to Recently Deleted`)
+  toast(`${label} moved to Recently Deleted`, {
+    label: 'Undo',
+    run: async () => {
+      await api.update(ids, { deleted: false })
+      refreshAll()
+    }
+  })
+  return true
 }
 
 export async function restore(ids: number[]): Promise<void> {
@@ -38,26 +65,39 @@ export async function restore(ids: number[]): Promise<void> {
   toast(`Recovered ${word(ids)}`)
 }
 
-export async function purge(ids: number[]): Promise<void> {
-  if (await api.purge(ids)) {
-    setState({ selection: new Set(), viewer: null })
-    refreshAll()
-  }
+export async function purge(ids: number[]): Promise<boolean> {
+  if (!ids.length) return false
+  const label = word(ids)
+  const ok = await confirmSheet({
+    title: `Remove ${label} from the Library?`,
+    message: 'This can’t be undone in Photos. The original files on disk stay untouched — only the library entry and any edits made in Photos are removed.',
+    confirm: 'Remove from Library',
+    danger: true
+  })
+  if (!ok) return false
+  await api.purge(ids)
+  setState({ selection: new Set(), viewer: null })
+  refreshAll()
+  return true
 }
 
-export async function exportAssets(ids: number[], mode: 'original' | 'current'): Promise<void> {
-  const r = await api.exportAssets(ids, mode)
-  if (r) toast(`Exported ${plural(r.files, 'file')} · ${formatBytes(r.bytes)} · byte-for-byte`)
+export function exportAssets(ids: number[], mode: 'original' | 'current'): void {
+  if (!ids.length) return
+  setState({ sheet: { kind: 'export', ids, unmodified: mode === 'original' }, menu: null })
+}
+
+export function openEditor(id: number): void {
+  setState({ editor: { id }, menu: null })
 }
 
 export async function showInFolder(id: number): Promise<void> {
   const d = await api.detail(id)
-  api.showInFolder(d.edited_path ?? d.original_path)
+  api.showInFolder(d.user_render ?? d.edited_path ?? d.original_path)
 }
 
 export async function openWithDefault(id: number): Promise<void> {
   const d = await api.detail(id)
-  api.openPath(d.edited_path ?? d.original_path)
+  api.openPath(d.user_render ?? d.edited_path ?? d.original_path)
 }
 
 export function promptNewAlbum(ids: number[] = [], folder = false, parentId: number | null = null): void {
@@ -86,16 +126,27 @@ export async function addToAlbum(albumId: number, ids: number[]): Promise<void> 
 export async function removeFromAlbum(albumId: number, ids: number[]): Promise<void> {
   await api.removeFromAlbum(albumId, ids)
   setState((s) => ({ assets: s.assets.filter((a) => !ids.includes(a.id)), selection: new Set() }))
+  toast(`Removed ${word(ids)} from the album`, {
+    label: 'Undo',
+    run: async () => {
+      await api.addToAlbum(albumId, ids)
+      refreshAll()
+    }
+  })
   refreshAll()
 }
 
-function albumSubmenu(ids: number[]): MenuItem[] {
+export function albumSubmenu(ids: number[]): MenuItem[] {
   const albums = getState().albums.filter((a) => !a.isFolder)
   return [
     { label: 'New Album…', icon: <Plus size={14} />, onClick: () => promptNewAlbum(ids) },
     ...(albums.length ? [{ separator: true } as MenuItem] : []),
     ...albums.map((a) => ({ label: a.name, icon: <Images size={14} />, onClick: () => addToAlbum(a.id, ids) }))
   ]
+}
+
+export function slideshow(ids: number[]): void {
+  setState({ slideshow: { ids, title: '' }, menu: null })
 }
 
 export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: boolean } = {}): MenuItem[] {
@@ -117,14 +168,17 @@ export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: b
   }
 
   return [
+    {
+      quick: [
+        { label: 'Slideshow', icon: <Play size={17} />, onClick: () => slideshow(ids.length > 1 ? ids : s.assets.map((a) => a.id).slice(Math.max(0, s.assets.findIndex((a) => a.id === ids[0])))) },
+        { label: allFav ? 'Unfavourite' : 'Favourite', icon: allFav ? <HeartOff size={17} /> : <Heart size={17} />, onClick: () => toggleFavorite(ids) },
+        { label: 'Share', icon: <Share size={17} />, onClick: () => exportAssets(ids, 'current') },
+        { label: 'Delete', icon: <Trash2 size={17} />, danger: true, onClick: () => void trash(ids) }
+      ]
+    },
+    { label: 'Edit', icon: <SlidersHorizontal size={14} />, shortcut: `${mod}E`, onClick: () => openEditor(ids[0]), disabled: !one },
     { label: 'Get Info', icon: <Info size={14} />, shortcut: `${mod}I`, onClick: opts.onInfo ?? (() => setState({ infoOpen: true })), disabled: !one },
     { label: 'Rotate Anticlockwise', icon: <RotateCcw size={14} />, shortcut: `${mod}R`, onClick: () => rotate(ids) },
-    {
-      label: allFav ? 'Unfavourite' : 'Favourite',
-      icon: allFav ? <HeartOff size={14} /> : <Heart size={14} />,
-      shortcut: '.',
-      onClick: () => toggleFavorite(ids)
-    },
     { separator: true },
     { label: 'Copy', icon: <Copy size={14} />, shortcut: `${mod}C`, onClick: () => api.copyImage(ids[0]).then(() => toast('Copied')), disabled: !one },
     { label: 'Add to', icon: <Plus size={14} />, submenu: albumSubmenu(ids) },
@@ -134,8 +188,8 @@ export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: b
       label: 'Export',
       icon: <Download size={14} />,
       submenu: [
-        { label: `Export ${label}…`, onClick: () => exportAssets(ids, 'current') },
-        { label: `Export Unmodified Original${ids.length > 1 ? 's' : ''}…`, shortcut: isMac ? '⇧⌘E' : 'Ctrl+Shift+E', onClick: () => exportAssets(ids, 'original') }
+        { label: `Export ${label}…`, shortcut: isMac ? '⇧⌘E' : 'Ctrl+Shift+E', onClick: () => exportAssets(ids, 'current') },
+        { label: `Export Unmodified Original${ids.length > 1 ? 's' : ''}…`, shortcut: isMac ? '⌥⇧⌘E' : 'Ctrl+Alt+Shift+E', onClick: () => exportAssets(ids, 'original') }
       ]
     },
     { label: `Show in ${fileManager}`, icon: <FolderOpen size={14} />, onClick: () => showInFolder(ids[0]), disabled: !one },
@@ -144,7 +198,7 @@ export function assetMenu(ids: number[], opts: { onInfo?: () => void; viewer?: b
     inHidden
       ? { label: `Unhide ${label}`, icon: <Eye size={14} />, shortcut: `${mod}L`, onClick: () => hide(ids, false) }
       : { label: `Hide ${label}`, icon: <EyeOff size={14} />, shortcut: `${mod}L`, onClick: () => hide(ids, true) },
-    { label: `Delete ${label}`, icon: <Trash2 size={14} />, shortcut: isMac ? '⌘⌫' : 'Del', danger: true, onClick: () => trash(ids) }
+    { label: `Delete ${label}…`, icon: <Trash2 size={14} />, shortcut: isMac ? '⌘⌫' : 'Del', danger: true, onClick: () => void trash(ids) }
   ]
 }
 
@@ -160,10 +214,20 @@ export function albumMenu(albumId: number, isFolder: boolean, onRename: () => vo
     { label: `Rename ${isFolder ? 'Folder' : 'Album'}`, onClick: onRename },
     { separator: true },
     {
-      label: `Delete ${isFolder ? 'Folder' : 'Album'}`,
+      label: `Delete ${isFolder ? 'Folder' : 'Album'}…`,
       danger: true,
       icon: <Trash2 size={14} />,
       onClick: async () => {
+        const name = getState().albums.find((a) => a.id === albumId)?.name ?? ''
+        const ok = await confirmSheet({
+          title: `Delete “${name}”?`,
+          message: isFolder
+            ? 'The folder and the albums inside it are deleted. Photos stay in your library.'
+            : 'The album is deleted. The photos in it stay in your library.',
+          confirm: `Delete ${isFolder ? 'Folder' : 'Album'}`,
+          danger: true
+        })
+        if (!ok) return
         await api.deleteAlbum(albumId)
         if (getState().source === `album:${albumId}`) setState({ source: 'albums' })
         refreshAll()

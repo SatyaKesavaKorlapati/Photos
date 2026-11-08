@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { Readable } from 'node:stream'
 import {
-  displayPath, ensureBounce, ensureCompatVideo, ensureFull, ensureLongExposure, ensurePreview, ensureThumb, getRenderRow, livePath
+  displayPath, editBasePath, ensureBaseFull, ensureBounce, ensureCompatVideo, ensureFull, ensureLongExposure, ensurePreview, ensureStrip, ensureThumb, getRenderRow, livePath
 } from './render'
 
 const MIME: Record<string, string> = {
@@ -27,6 +27,8 @@ async function serveFile(path: string, req: Request, cache = true): Promise<Resp
   const headers: Record<string, string> = {
     'Content-Type': contentType,
     'Accept-Ranges': 'bytes',
+    // The editor uploads these images into WebGL, which requires CORS-clean pixels.
+    'Access-Control-Allow-Origin': '*',
     'Cache-Control': cache ? 'max-age=31536000, immutable' : 'no-cache'
   }
   const range = req.headers.get('range')
@@ -84,6 +86,12 @@ export function handleMediaProtocol(): void {
         }
         case 'bounce': return await serveFile(await ensureBounce(id), req)
         case 'longexposure': return await serveFile(await ensureLongExposure(id), req)
+        case 'base': {
+          const r = getRenderRow(id)
+          if (!r) break
+          return await serveFile(r.kind === 'video' ? editBasePath(r) : await ensureBaseFull(id), req, false)
+        }
+        case 'strip': return await serveFile(await ensureStrip(id, url.searchParams.get('edited') !== '1'), req)
         case 'compat': return await serveFile(await ensureCompatVideo(id, url.searchParams.get('which') === 'live' ? 'live' : 'video'), req)
       }
     } catch (e) {

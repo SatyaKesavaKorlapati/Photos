@@ -84,6 +84,11 @@ export function openDb(libraryDir: string): DatabaseSync {
   db = new DatabaseSync(join(libraryDir, 'photos.db'))
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;')
   db.exec(SCHEMA)
+  const cols = new Set((db.prepare('PRAGMA table_info(assets)').all() as { name: string }[]).map((c) => c.name))
+  // In-app edits: the recipe, its rendered still/movie, and the Live Photo motion render. Originals are never touched.
+  for (const [name, type] of [['user_edits', 'TEXT'], ['user_render', 'TEXT'], ['user_live_render', 'TEXT'], ['user_edit_at', 'INTEGER']]) {
+    if (!cols.has(name)) db.exec(`ALTER TABLE assets ADD COLUMN ${name} ${type}`)
+  }
   return db
 }
 

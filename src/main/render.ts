@@ -1,12 +1,12 @@
 import { Worker } from 'node:worker_threads'
 import { existsSync, mkdirSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { rm, stat } from 'node:fs/promises'
 import { cpus, totalmem } from 'node:os'
 import { dirname, extname, join } from 'node:path'
 import sharp from 'sharp'
 import workerPath from './thumbWorker?modulePath'
 import { getDb } from './db'
-import { ffmpeg, ffprobe } from './tools'
+import { FFMPEG, FFMPEG_HEIC, ffmpeg, ffprobe } from './tools'
 
 export const THUMB_SIZE = 512
 export const PREVIEW_SIZE = 1600
@@ -88,7 +88,7 @@ class Pool {
       const job = this.high.shift() ?? this.low.shift()
       if (!job) return
       slot.busy = job
-      slot.w.postMessage({ jobId: job.jobId, ...job.payload })
+      slot.w.postMessage({ jobId: job.jobId, ffmpeg: FFMPEG_HEIC ? FFMPEG : undefined, ...job.payload })
     }
   }
 }
@@ -123,18 +123,55 @@ interface RenderRow {
   edited_path: string | null
   live_path: string | null
   live_edited_path: string | null
+  user_render: string | null
+  user_live_render: string | null
   width: number | null
   height: number | null
+  duration: number | null
 }
 
 const rowStmt = () =>
-  getDb().prepare('SELECT id, kind, original_path, edited_path, live_path, live_edited_path, width, height FROM assets WHERE id = ?')
+  getDb().prepare(
+    'SELECT id, kind, original_path, edited_path, live_path, live_edited_path, user_render, user_live_render, width, height, duration FROM assets WHERE id = ?'
+  )
 
 export function getRenderRow(id: number): RenderRow | undefined {
   return rowStmt().get(id) as RenderRow | undefined
 }
 
-export const displayPath = (r: RenderRow, original = false): string => (original ? r.original_path : r.edited_path ?? r.original_path)
+/** The version shown in the library: an in-app edit, else the iPhone's edited render, else the original. */
+export const displayPath = (r: RenderRow, original = false): string =>
+  original ? r.original_path : r.user_render ?? r.edited_path ?? r.original_path
+
+/** The version the editor starts from (in-app edits are re-applied to this, never stacked). */
+export const editBasePath = (r: RenderRow): string => r.edited_path ?? r.original_path
+
+/** Drops every cached derivative of an asset after its edit changes. */
+export async function invalidateCache(id: number): Promise<void> {
+  const files = [
+    cachePath('thumbs', id), cachePath('previews', id), cachePath('full', id), cachePath('video', id, '.mp4'), cachePath('video', id, '-live.mp4'),
+    cachePath('live', id, '-bounce.mp4'), cachePath('live', id, '-longexposure.jpg'), cachePath('video', id, '-strip-e.jpg'),
+    cachePath('full', id, '-b.jpg')
+  ]
+  await Promise.all(files.map((f) => rm(f, { force: true }).catch(() => undefined)))
+  getDb().prepare('UPDATE assets SET thumb_done = 0 WHERE id = ?').run(id)
+}
+
+/** A row of frames for the video trimmer. */
+export function ensureStrip(id: number, original = true): Promise<string> {
+  const out = cachePath('video', id, original ? '-strip.jpg' : '-strip-e.jpg')
+  return once(`strip:${id}:${original}`, async () => {
+    if (await exists(out)) return out
+    const r = getRenderRow(id)
+    if (!r) throw new Error('missing asset')
+    const src = original ? editBasePath(r) : displayPath(r)
+    const dur = r.duration || Number((await ffprobe(src)).format?.duration) || 1
+    mkdirSync(dirname(out), { recursive: true })
+    const n = 14
+    await ffLimit.run(() => ffmpeg(['-i', src, '-an', '-vf', `fps=${(n / dur).toFixed(5)},scale=-2:96,tile=${n}x1`, '-frames:v', '1', '-q:v', '4', out]), true)
+    return out
+  })
+}
 
 const inflight = new Map<string, Promise<string>>()
 
@@ -254,10 +291,26 @@ export function ensureFull(id: number, original = false): Promise<string> {
   })
 }
 
+/** Full-resolution still of the edit base, so re-editing never stacks on an earlier in-app render. */
+export async function ensureBaseFull(id: number): Promise<string> {
+  const r = getRenderRow(id)
+  if (!r) throw new Error('missing asset')
+  const src = editBasePath(r)
+  if (NATIVE.has(extname(src).toLowerCase())) return src
+  if (!r.user_render) return ensureFull(id)
+  if (src === r.original_path) return ensureFull(id, true)
+  const out = cachePath('full', id, '-b.jpg')
+  return once(`base:${id}`, async () => {
+    if (await exists(out)) return out
+    await getPool().run({ src, full: out, thumbSize: THUMB_SIZE, previewSize: PREVIEW_SIZE }, 'high')
+    return out
+  })
+}
+
 export function livePath(id: number, original = false): string | undefined {
   const r = getRenderRow(id)
   if (!r) return undefined
-  return original ? r.live_path ?? undefined : r.live_edited_path ?? r.live_path ?? undefined
+  return original ? r.live_path ?? undefined : r.user_live_render ?? r.live_edited_path ?? r.live_path ?? undefined
 }
 
 /** Bounce: the clip played forward then backward, rendered once and cached. */
@@ -278,20 +331,36 @@ export function ensureBounce(id: number): Promise<string> {
   })
 }
 
-/** Long Exposure fallback when no rendered still exists: average every frame of the movie. */
+/**
+ * Long Exposure fallback when no rendered still exists. Like iOS, frames are first aligned to the
+ * key moment (vidstab tripod mode) so static scenery stays sharp and only real motion smears.
+ */
 export function ensureLongExposure(id: number): Promise<string> {
   const out = cachePath('live', id, '-longexposure.jpg')
   return once(`longexp:${id}`, async () => {
     if (await exists(out)) return out
     const src = livePath(id, true)
     if (!src) throw new Error('not a live photo')
-    mkdirSync(dirname(out), { recursive: true })
+    const dir = dirname(out)
+    mkdirSync(dir, { recursive: true })
     // tmix only emits once its window is full, so the window must not exceed the clip's frame count.
     const v = (await ffprobe(src)).streams?.find((s) => s.codec_type === 'video')
     const [num, den] = String(v?.avg_frame_rate ?? '30/1').split('/').map(Number)
     const count = Number(v?.nb_frames) || Math.floor((Number(v?.duration) || 3) * (num / (den || 1) || 30))
     const frames = Math.max(2, Math.min(120, count - 1))
-    await ffLimit.run(() => ffmpeg(['-i', src, '-an', '-vf', `tmix=frames=${frames}`, '-update', '1', '-q:v', '2', out]), true)
+    const blend = (pre: string): string[] => ['-i', src, '-an', '-vf', `${pre}tmix=frames=${frames}`, '-update', '1', '-q:v', '2', out]
+    // vidstab's result path is a filter option, where Windows drive colons need escaping; a cwd-relative name avoids that.
+    const trf = `${id}-longexposure.trf`
+    try {
+      await ffLimit.run(async () => {
+        await ffmpeg(['-i', src, '-an', '-vf', `vidstabdetect=shakiness=8:accuracy=15:tripod=${Math.max(1, Math.round(count / 2))}:result=${trf}`, '-f', 'null', '-'], undefined, dir)
+        await ffmpeg(blend(`vidstabtransform=input=${trf}:tripod=1:zoom=0:optzoom=0:crop=keep:interpol=bicubic,`), undefined, dir)
+      }, true)
+    } catch {
+      await ffLimit.run(() => ffmpeg(blend('')), true)
+    } finally {
+      await rm(join(dir, trf), { force: true }).catch(() => undefined)
+    }
     if (!(await exists(out))) throw new Error('long exposure render produced no frame')
     return out
   })

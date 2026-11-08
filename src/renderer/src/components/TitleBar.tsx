@@ -6,19 +6,53 @@ import { applyFilter, getState, navigate, setState, updateSettings, useStore } f
 import type { ShowFilter, Suggestion } from '../types'
 import { countLabel, rangeLabel } from '../util'
 import { openMenu } from './Menu'
+import { SidebarIcon } from './Icons'
 
-export function TrafficLights() {
+/**
+ * Window controls in a glass bubble pinned to the top-left corner. At rest it is a small capsule;
+ * on hover it swells and the lights magnify toward the pointer like the Dock.
+ */
+export function TrafficLights({ autoHide = false }: { autoHide?: boolean }) {
+  const [mx, setMx] = useState<number | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const fullscreen = useStore((s) => s.fullscreen)
+  if (isMac) return null
+  const btns = [
+    { cls: 'close', title: 'Close', run: () => api.win.close(), icon: <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" strokeWidth="1.2" /> },
+    { cls: 'min', title: 'Minimise', run: () => api.win.minimize(), icon: <path d="M1 4h6" stroke="currentColor" strokeWidth="1.3" /> },
+    {
+      cls: 'max',
+      title: fullscreen ? 'Exit Full Screen' : 'Full Screen (click) · Zoom (Alt+click)',
+      run: (e: React.MouseEvent) => (e.altKey ? api.win.maximize() : api.win.fullscreen()),
+      icon: fullscreen
+        ? <path d="M3.2 1v2.2H1M4.8 7V4.8H7" stroke="currentColor" strokeWidth="1.2" fill="none" />
+        : <path d="M2 2h3.2L2 5.2zM6 6H2.8L6 2.8z" fill="currentColor" />
+    }
+  ]
   return (
-    <div className="traffic">
-      <button className="close" title="Close" onClick={() => api.win.close()}>
-        <svg viewBox="0 0 8 8"><path d="M1.5 1.5l5 5M6.5 1.5l-5 5" stroke="currentColor" strokeWidth="1.2" /></svg>
-      </button>
-      <button className="min" title="Minimise" onClick={() => api.win.minimize()}>
-        <svg viewBox="0 0 8 8"><path d="M1 4h6" stroke="currentColor" strokeWidth="1.3" /></svg>
-      </button>
-      <button className="max" title="Zoom" onClick={() => api.win.maximize()}>
-        <svg viewBox="0 0 8 8"><path d="M2 2h3.2L2 5.2zM6 6H2.8L6 2.8z" fill="currentColor" /></svg>
-      </button>
+    <div className={`traffic-zone${autoHide ? ' auto' : ''}`}>
+      <div
+        ref={ref}
+        className={`traffic glass${mx !== null ? ' hot' : ''}`}
+        onMouseMove={(e) => setMx(e.clientX - (ref.current?.getBoundingClientRect().left ?? 0))}
+        onMouseLeave={() => setMx(null)}
+      >
+        {btns.map((b, i) => {
+          const center = 14 + i * 24 + 7
+          const k = mx === null ? 0 : Math.max(0, 1 - Math.abs(mx - center) / 46)
+          return (
+            <button
+              key={b.cls}
+              className={b.cls}
+              title={b.title}
+              style={{ transform: `scale(${1 + k * 0.42})` }}
+              onClick={(e) => b.run(e)}
+            >
+              <svg viewBox="0 0 8 8">{b.icon}</svg>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -134,6 +168,7 @@ export function Toolbar({ visibleRange }: { visibleRange: [number, number] | nul
   const infoOpen = useStore((s) => s.infoOpen)
   const collapsed = useStore((s) => s.sidebarCollapsed)
   const settings = useStore((s) => s.settings)
+  const selectMode = useStore((s) => s.selectMode)
   const ids = [...selection]
   const isGrid = !['memories', 'albums', 'imports'].includes(source) && (source !== 'library' || view === 'all')
   const shown = applyFilter(assets, filter)
@@ -148,10 +183,17 @@ export function Toolbar({ visibleRange }: { visibleRange: [number, number] | nul
   if (selection.size) subtitle = `${selection.size.toLocaleString()} of ${shown.length.toLocaleString()} selected`
 
   return (
-    <header className="toolbar drag">
-      {collapsed && !isMac && <TrafficLights />}
-      {collapsed && isMac && <div style={{ width: 70 }} />}
-      <div className="title-block">
+    <header className={`toolbar drag${collapsed ? ' wide' : ''}`} onDoubleClick={(e) => e.target === e.currentTarget && api.win.maximize()}>
+      {collapsed && (
+        <button className="tb-btn glass sb-toggle no-drag" title={`Show Sidebar (${isMac ? '⌥⌘S' : 'Ctrl+Alt+S'})`} onClick={() => setState({ sidebarCollapsed: false })}>
+          <SidebarIcon />
+        </button>
+      )}
+      <div
+        className="title-block"
+        title="Double-click to jump to the newest photos"
+        onDoubleClick={() => window.dispatchEvent(new CustomEvent('grid:jump', { detail: 'end' }))}
+      >
         <div className="title">{title}</div>
         {subtitle && <div className="subtitle">{subtitle}</div>}
       </div>
@@ -223,6 +265,16 @@ export function Toolbar({ visibleRange }: { visibleRange: [number, number] | nul
             <Share size={15} />
           </button>
         </div>
+      )}
+
+      {isGrid && shown.length > 0 && (
+        <button
+          className={`tb-btn glass no-drag select-btn${selectMode ? ' active' : ''}`}
+          title={`${selectMode ? 'Done selecting' : 'Select'} (${isMac ? '⇧⌘S' : 'Ctrl+Shift+S'})`}
+          onClick={() => setState({ selectMode: !selectMode, selection: new Set() })}
+        >
+          {selectMode ? 'Cancel' : 'Select'}
+        </button>
       )}
 
       <button

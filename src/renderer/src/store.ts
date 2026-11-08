@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { api } from './api'
+import { api, setEditVersions } from './api'
 import type { Album, FolderEntry, GridAsset, ImportEntry, ImportProgress, LibraryView, Settings, ShowFilter, ThumbProgress } from './types'
 
 export interface ViewerState {
@@ -18,6 +18,8 @@ export interface MenuItem {
   separator?: boolean
   header?: boolean
   submenu?: MenuItem[]
+  /** Renders as the row of large icon buttons at the top of iOS context menus. */
+  quick?: MenuItem[]
   onClick?: () => void
 }
 
@@ -26,13 +28,20 @@ export interface MenuState {
   y: number
   items: MenuItem[]
   align?: 'left' | 'right'
+  /** Bottom edge to use when the menu has to open upwards (the top of the button that opened it). */
+  above?: number
 }
 
 export type Sheet =
   | { kind: 'import'; folders?: string[]; files?: string[] }
   | { kind: 'settings' }
   | { kind: 'prompt'; title: string; placeholder: string; confirm: string; initial?: string; onSubmit: (v: string) => void }
+  | { kind: 'confirm'; title: string; message: string; confirm: string; danger?: boolean; onConfirm: () => void; onCancel?: () => void }
+  | { kind: 'export'; ids: number[]; unmodified?: boolean }
+  | { kind: 'shortcuts' }
   | null
+
+export interface Toast { id: number; text: string; action?: { label: string; run: () => void } }
 
 export interface State {
   source: string
@@ -57,12 +66,19 @@ export interface State {
   thumbProgress: ThumbProgress | null
   menu: MenuState | null
   sheet: Sheet
-  toast: { id: number; text: string } | null
+  toast: Toast | null
   scrollTarget: number | null
   albumParent: number | null
   slideshow: { ids: number[]; title: string; subtitle?: string } | null
   maximized: boolean
+  fullscreen: boolean
   version: number
+  selectMode: boolean
+  editor: { id: number } | null
+  /** Screen rect of the grid cell a viewer was opened from, for the zoom transition. */
+  viewerOrigin: { id: number; rect: DOMRect } | null
+  hiddenUnlocked: boolean
+  sidebarPeek: boolean
 }
 
 let state: State = {
@@ -93,7 +109,13 @@ let state: State = {
   albumParent: null,
   slideshow: null,
   maximized: false,
-  version: 0
+  fullscreen: false,
+  version: 0,
+  selectMode: false,
+  editor: null,
+  viewerOrigin: null,
+  hiddenUnlocked: false,
+  sidebarPeek: false
 }
 
 const listeners = new Set<() => void>()
@@ -119,12 +141,19 @@ export function useStore<T>(sel: (s: State) => T): T {
 }
 
 let toastId = 0
-export function toast(text: string): void {
+export function toast(text: string, action?: Toast['action']): void {
   const id = ++toastId
-  setState({ toast: { id, text } })
+  setState({ toast: { id, text, action } })
   setTimeout(() => {
     if (getState().toast?.id === id) setState({ toast: null })
-  }, 2600)
+  }, action ? 5000 : 2600)
+}
+
+/** Apple-style confirmation sheet; resolves true when the user confirms. */
+export function confirmSheet(opts: { title: string; message: string; confirm: string; danger?: boolean }): Promise<boolean> {
+  return new Promise((resolve) => {
+    setState({ sheet: { kind: 'confirm', ...opts, onConfirm: () => resolve(true), onCancel: () => resolve(false) } })
+  })
 }
 
 /** Sources that are rendered by something other than the photo grid. */
@@ -137,6 +166,7 @@ export async function loadAssets(source = state.source): Promise<void> {
   if (state.assetsSource !== source) setState({ loading: true })
   const assets = await api.list(source)
   if (seq !== loadSeq) return
+  setEditVersions(assets)
   setState({ assets, assetsSource: source, loading: false })
 }
 
@@ -157,6 +187,10 @@ export function navigate(source: string, opts: { view?: LibraryView; scrollTo?: 
     anchor: null,
     viewer: null,
     menu: null,
+    selectMode: false,
+    sidebarPeek: false,
+    // Like iOS, the Hidden album locks again as soon as you leave it.
+    hiddenUnlocked: source === 'hidden' ? state.hiddenUnlocked : false,
     view: opts.view ?? state.view,
     scrollTarget: opts.scrollTo ?? null,
     filter: source === state.source ? state.filter : 'all',
@@ -181,9 +215,9 @@ export function applyFilter(items: GridAsset[], filter: ShowFilter): GridAsset[]
   }
 }
 
-export function openViewer(ids: number[], id: number, source: string): void {
+export function openViewer(ids: number[], id: number, source: string, origin?: DOMRect): void {
   const index = Math.max(0, ids.indexOf(id))
-  setState({ viewer: { ids, index, source }, menu: null })
+  setState({ viewer: { ids, index, source }, menu: null, viewerOrigin: origin ? { id, rect: origin } : null })
 }
 
 export function selectedIds(): number[] {
@@ -210,7 +244,8 @@ export async function patchAssets(ids: number[], patch: { favorite?: boolean; hi
         if (patch.hidden !== undefined) return s.source === 'hidden' ? patch.hidden : !patch.hidden
         if (patch.favorite === false && s.source === 'favorites') return false
         return true
-      })
+      }),
+    selection: patch.deleted !== undefined || patch.hidden !== undefined ? new Set([...s.selection].filter((x) => !set.has(x))) : s.selection
   }))
   await api.update(ids, patch)
   refreshMeta()

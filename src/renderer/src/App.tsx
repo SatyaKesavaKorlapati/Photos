@@ -1,22 +1,26 @@
 import { useEffect, useMemo, useState } from 'react'
+import { EyeOff, Heart, Plus, Share, Trash2, Undo2 } from 'lucide-react'
 import { api, previewUrl } from './api'
-import { exportAssets, hide, promptNewAlbum, rotate, toggleFavorite, trash } from './actions'
+import {
+  albumSubmenu, exportAssets, hide, openEditor, promptNewAlbum, purge, restore, rotate, toggleFavorite, trash
+} from './actions'
 import {
   applyFilter, getState, loadAssets, navigate, refreshAll, refreshMeta, setState, updateSettings, useStore
 } from './store'
 import type { LibraryView } from './types'
-import { rangeLabel } from './util'
+import { plural, rangeLabel } from './util'
 import { CardsView } from './components/Cards'
 import { Segmented } from './components/Controls'
 import { PhotoGrid } from './components/Grid'
 import { InfoPanel } from './components/InfoPanel'
 import { Memories, Slideshow } from './components/Memories'
-import { MenuLayer } from './components/Menu'
-import { AlbumsPage, EmptyLibrary, HiddenLock, ImportsPage, useHiddenUnlock } from './components/Pages'
+import { MenuLayer, openMenu } from './components/Menu'
+import { AlbumsPage, EmptyLibrary, HiddenLock, ImportsPage } from './components/Pages'
 import { SheetLayer } from './components/Sheets'
-import { Rail, Sidebar } from './components/Sidebar'
-import { startPick, Toolbar } from './components/TitleBar'
+import { Sidebar, SidebarPeek } from './components/Sidebar'
+import { startPick, Toolbar, TrafficLights } from './components/TitleBar'
 import { Viewer } from './components/Viewer'
+import { Editor } from './editor/Editor'
 
 function FloatHeader({ range }: { range: [number, number] | null }) {
   if (!range) return null
@@ -31,6 +35,8 @@ function FloatHeader({ range }: { range: [number, number] | null }) {
 
 function LibraryViewSwitch() {
   const view = useStore((s) => s.view)
+  const selectMode = useStore((s) => s.selectMode)
+  if (selectMode) return null
   return (
     <div className="seg-float">
       <Segmented<LibraryView>
@@ -51,6 +57,49 @@ function LibraryViewSwitch() {
   )
 }
 
+/** iOS Select mode bar: count in the middle, actions either side. */
+function SelectBar() {
+  const selectMode = useStore((s) => s.selectMode)
+  const selection = useStore((s) => s.selection)
+  const assets = useStore((s) => s.assets)
+  const source = useStore((s) => s.source)
+  if (!selectMode) return null
+  const ids = [...selection]
+  const n = ids.length
+  const list = assets.filter((a) => selection.has(a.id))
+  const v = list.filter((a) => a.video).length
+  const label = n === 0 ? 'Select Items' : `${plural(n, v === n ? 'Video' : v ? 'Item' : 'Photo')} Selected`
+  const allFav = n > 0 && list.every((a) => a.fav)
+  const deleted = source === 'deleted'
+  return (
+    <div className="select-bar glass" onMouseDown={(e) => e.stopPropagation()}>
+      {deleted ? (
+        <button className="sb-act" disabled={!n} title="Recover" onClick={() => restore(ids).then(() => setState({ selection: new Set() }))}><Undo2 size={18} /></button>
+      ) : (
+        <>
+          <button className="sb-act" disabled={!n} title="Share / Export" onClick={() => exportAssets(ids, 'current')}><Share size={18} /></button>
+          <button className="sb-act" disabled={!n} title="Add to Album" onClick={(e) => openMenu(e.currentTarget.getBoundingClientRect(), albumSubmenu(ids))}><Plus size={19} /></button>
+        </>
+      )}
+      <div className="sb-label">
+        <b>{label}</b>
+        <button className="link" onClick={() => setState({ selection: n === assets.length ? new Set() : new Set(applyFilter(assets, getState().filter).map((a) => a.id)) })}>
+          {n === assets.length && n ? 'Deselect All' : 'Select All'}
+        </button>
+      </div>
+      {!deleted && (
+        <>
+          <button className={`sb-act${allFav ? ' fav-on' : ''}`} disabled={!n} title="Favourite" onClick={() => toggleFavorite(ids)}>
+            <Heart size={18} fill={allFav ? 'currentColor' : 'none'} />
+          </button>
+          <button className="sb-act" disabled={!n} title={source === 'hidden' ? 'Unhide' : 'Hide'} onClick={() => hide(ids, source !== 'hidden')}><EyeOff size={18} /></button>
+        </>
+      )}
+      <button className="sb-act danger" disabled={!n} title="Delete" onClick={() => void (deleted ? purge(ids) : trash(ids))}><Trash2 size={18} /></button>
+    </div>
+  )
+}
+
 function Content({ onRange, range }: { onRange: (r: [number, number] | null) => void; range: [number, number] | null }) {
   const source = useStore((s) => s.source)
   const view = useStore((s) => s.view)
@@ -59,13 +108,14 @@ function Content({ onRange, range }: { onRange: (r: [number, number] | null) => 
   const filter = useStore((s) => s.filter)
   const loading = useStore((s) => s.loading)
   const counts = useStore((s) => s.counts)
-  const [hiddenOpen, unlockHidden] = useHiddenUnlock()
+  const hiddenUnlocked = useStore((s) => s.hiddenUnlocked)
+  const locked = useStore((s) => !!s.settings?.hiddenLocked)
   const items = useMemo(() => applyFilter(assets, filter), [assets, filter])
 
   if (source === 'memories') return <Memories />
   if (source === 'albums') return <AlbumsPage />
   if (source === 'imports') return <ImportsPage />
-  if (source === 'hidden' && !hiddenOpen) return <HiddenLock onUnlock={unlockHidden} />
+  if (source === 'hidden' && locked && !hiddenUnlocked) return <HiddenLock />
   if (!loading && counts.library === 0 && source === 'library' && !counts.deleted) return <EmptyLibrary />
   if (assetsSource !== source) return null
 
@@ -112,11 +162,13 @@ export default function App() {
   const settings = useStore((s) => s.settings)
   const collapsed = useStore((s) => s.sidebarCollapsed)
   const viewer = useStore((s) => s.viewer)
+  const editor = useStore((s) => s.editor)
   const infoOpen = useStore((s) => s.infoOpen)
   const selection = useStore((s) => s.selection)
   const toast = useStore((s) => s.toast)
   const assets = useStore((s) => s.assets)
   const source = useStore((s) => s.source)
+  const fullscreen = useStore((s) => s.fullscreen)
   const [range, setRange] = useState<[number, number] | null>(null)
   const [dropping, setDropping] = useState(false)
 
@@ -125,22 +177,35 @@ export default function App() {
       setState({ settings: s, zoom: s.zoom, view: s.libraryView, sidebarCollapsed: s.sidebarCollapsed })
       refreshAll()
     })
+    api.win.isFullscreen().then((f) => setState({ fullscreen: f }))
     let t: number | undefined
     const offs = [
       api.on('library:changed', () => {
         window.clearTimeout(t)
         t = window.setTimeout(() => {
-          if (!getState().viewer) loadAssets()
+          if (!getState().viewer && !getState().editor) loadAssets()
           refreshMeta()
           setState((s) => ({ version: s.version + 1 }))
         }, 250)
       }),
       api.on('import:progress', (p) => setState({ importProgress: p })),
       api.on('thumbs:progress', (p) => setState({ thumbProgress: p })),
-      api.on('window:state', (p) => p.maximized !== undefined && setState({ maximized: p.maximized })),
+      api.on('window:state', (p) => {
+        if (p.maximized !== undefined) setState({ maximized: p.maximized })
+        if (p.fullscreen !== undefined) setState({ fullscreen: p.fullscreen })
+      }),
       api.on('menu:command', (c) => runCommand(c))
     ]
-    return () => offs.forEach((o) => o())
+    // Leaving the app re-locks the Hidden album, like iOS.
+    const onBlur = () => {
+      const s = getState()
+      if (s.hiddenUnlocked && s.source !== 'hidden') setState({ hiddenUnlocked: false })
+    }
+    window.addEventListener('blur', onBlur)
+    return () => {
+      offs.forEach((o) => o())
+      window.removeEventListener('blur', onBlur)
+    }
   }, [])
 
   useEffect(() => {
@@ -168,6 +233,7 @@ export default function App() {
       const ctrl = e.ctrlKey || e.metaKey
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return
+      if (getState().editor) return
       if (ctrl && ['1', '2', '3', '4'].includes(e.key)) {
         e.preventDefault()
         runCommand(['view-years', 'view-months', 'view-days', 'view-all'][+e.key - 1])
@@ -176,9 +242,11 @@ export default function App() {
       if (ctrl && !e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault(); runCommand(e.altKey ? 'new-folder' : 'new-album') }
       if (ctrl && e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); runCommand('toggle-sidebar') }
       if (ctrl && e.key === ',') { e.preventDefault(); setState({ sheet: { kind: 'settings' } }) }
+      if (ctrl && e.key === '/') { e.preventDefault(); setState({ sheet: { kind: 'shortcuts' } }) }
+      if (e.key === 'F11') { e.preventDefault(); api.win.fullscreen() }
       if (ctrl && e.shiftKey && e.key.toLowerCase() === 'e') {
         e.preventDefault()
-        runCommand('export-original')
+        runCommand(e.altKey ? 'export-original' : 'export')
       }
     }
     window.addEventListener('keydown', onKey)
@@ -191,7 +259,7 @@ export default function App() {
     <>
       <div className="ambient" style={{ backgroundImage: 'var(--ambient-image)' }} />
       <div
-        className="app"
+        className={`app${collapsed ? ' compact' : ''}${fullscreen ? ' fullscreen' : ''}`}
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('Files')) {
             e.preventDefault()
@@ -212,20 +280,37 @@ export default function App() {
         }}
       >
         {!collapsed && <Sidebar />}
-        <main className={`main${collapsed ? ' rail-mode' : ''}`}>
-          {collapsed && <Rail />}
-          <Toolbar visibleRange={range} />
+        <main className="main">
           <section className="content glass" onMouseDown={() => getState().menu && setState({ menu: null })}>
             <Content onRange={setRange} range={range} />
-            {viewer && <Viewer />}
+            <Toolbar visibleRange={range} />
+            <SelectBar />
             {!viewer && infoOpen && singleSel !== null && <InfoPanel id={singleSel} />}
           </section>
         </main>
+        {collapsed && <SidebarPeek />}
       </div>
+      {!viewer && !editor && <TrafficLights />}
+      {viewer && <Viewer />}
+      {editor && <Editor key={editor.id} />}
       <MenuLayer />
       <SheetLayer />
       <Slideshow />
-      {toast && <div key={toast.id} className="toast glass-strong">{toast.text}</div>}
+      {toast && (
+        <div key={toast.id} className="toast glass-strong">
+          <span>{toast.text}</span>
+          {toast.action && (
+            <button
+              onClick={() => {
+                toast.action!.run()
+                setState({ toast: null })
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
+        </div>
+      )}
       {dropping && <div className="drop-overlay">Drop to Import</div>}
     </>
   )
@@ -249,14 +334,21 @@ function runCommand(c: string): void {
     case 'import-files': startPick('files'); break
     case 'new-album': promptNewAlbum(ids); break
     case 'new-folder': promptNewAlbum([], true); break
-    case 'toggle-sidebar': setState({ sidebarCollapsed: !s.sidebarCollapsed }); break
+    case 'toggle-sidebar': setState({ sidebarCollapsed: !s.sidebarCollapsed, sidebarPeek: false }); break
+    case 'select-mode': setState({ selectMode: !s.selectMode, selection: new Set() }); break
     case 'zoom-in': setState({ zoom: Math.max(1, s.zoom - 1) }); break
     case 'zoom-out': setState({ zoom: Math.min(9, s.zoom + 1) }); break
     case 'info': setState({ infoOpen: !s.infoOpen }); break
+    case 'export': if (ids.length) exportAssets(ids, 'current'); break
     case 'export-original': if (ids.length) exportAssets(ids, 'original'); break
+    case 'edit': {
+      const id = s.viewer ? s.viewer.ids[s.viewer.index] : ids.length === 1 ? ids[0] : null
+      if (id !== null) openEditor(id)
+      break
+    }
     case 'favorite': if (ids.length) toggleFavorite(ids); break
     case 'rotate': if (ids.length) rotate(ids); break
     case 'hide': if (ids.length) hide(ids, s.source !== 'hidden'); break
-    case 'delete': if (ids.length) trash(ids); break
+    case 'delete': if (ids.length) void trash(ids); break
   }
 }

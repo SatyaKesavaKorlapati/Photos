@@ -23,6 +23,12 @@ const api = {
   openPath: (path: string) => invoke('asset:open', path),
   copyImage: (id: number) => invoke('asset:copy', id),
   exportAssets: (ids: number[], mode: 'original' | 'current') => invoke('asset:export', ids, mode),
+  runExport: (ids: number[], opts: Record<string, unknown>) => invoke('export:run', ids, opts),
+  getEdit: (id: number) => invoke('edit:get', id),
+  saveEdit: (id: number, recipe: unknown, png: Uint8Array | null, out: { w: number; h: number }) => invoke('edit:save', id, recipe, png, out),
+  revertEdit: (id: number) => invoke('edit:revert', id),
+  authAvailable: () => invoke('auth:available'),
+  authVerify: (reason: string) => invoke('auth:verify', reason),
   albums: () => invoke('albums:list'),
   createAlbum: (name: string, parentId: number | null, isFolder: boolean, ids?: number[]) => invoke('albums:create', name, parentId, isFolder, ids),
   renameAlbum: (id: number, name: string) => invoke('albums:rename', id, name),
@@ -39,7 +45,8 @@ const api = {
   win: {
     minimize: () => ipcRenderer.send('window:minimize'),
     maximize: () => ipcRenderer.send('window:maximize'),
-    fullscreen: () => ipcRenderer.send('window:fullscreen'),
+    fullscreen: (on?: boolean) => ipcRenderer.send('window:fullscreen', on),
+    isFullscreen: () => invoke('window:isFullscreen'),
     close: () => ipcRenderer.send('window:close')
   },
   on

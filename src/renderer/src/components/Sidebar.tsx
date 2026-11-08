@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Images, Sparkles, Heart, Clock, Video, UserRound, Camera, MonitorPlay, Film, Copy, EyeOff, Trash2, ChevronDown, Plus,
-  Folder, FolderOpen, Download, Settings2, SquareStack, Timer, Sun, LayoutGrid
+  Folder, FolderOpen, Download, Settings2, Timer, Sun, LayoutGrid, Lock
 } from 'lucide-react'
 import { api } from '../api'
 import { addToAlbum, albumMenu, promptNewAlbum } from '../actions'
@@ -12,7 +12,6 @@ import {
   BounceIcon, BurstIcon, CinematicIcon, LiveIcon, LongExposureIcon, LoopIcon, PanoramaIcon, PortraitIcon, RawIcon, SidebarIcon, SlomoIcon
 } from './Icons'
 import { openMenu } from './Menu'
-import { TrafficLights } from './TitleBar'
 
 const MEDIA_TYPES: { src: string; label: string; icon: ReactNode }[] = [
   { src: 'videos', label: 'Videos', icon: <Video size={16} /> },
@@ -194,16 +193,19 @@ function StatusFooter() {
   )
 }
 
-export function Sidebar() {
+export function Sidebar({ peek = false, onLeave }: { peek?: boolean; onLeave?: () => void }) {
   const counts = useStore((s) => s.counts)
   const albums = useStore((s) => s.albums)
   const folders = useStore((s) => s.folders)
-  const mac = api.platform === 'darwin'
   return (
-    <aside className="sidebar glass">
+    <aside className={`sidebar glass${peek ? ' peek' : ''}`} onMouseLeave={onLeave}>
       <div className="sidebar-top drag">
-        {mac ? <div style={{ width: 64 }} /> : <TrafficLights />}
-        <button className="tb-btn no-drag" title="Hide Sidebar" onClick={() => setState({ sidebarCollapsed: true })}>
+        <div style={{ width: 76 }} />
+        <button
+          className="tb-btn no-drag"
+          title={peek ? 'Keep Sidebar Open' : 'Hide Sidebar'}
+          onClick={() => setState({ sidebarCollapsed: !peek, sidebarPeek: false })}
+        >
           <SidebarIcon />
         </button>
       </div>
@@ -224,7 +226,12 @@ export function Sidebar() {
         <Section title="Utilities">
           <Item src="imports" label="Imports" icon={<Download size={16} />} />
           <Item src="duplicates" label="Duplicates" icon={<Copy size={16} />} count={counts.duplicates} />
-          <Item src="hidden" label="Hidden" icon={<EyeOff size={16} />} count={getState().settings?.hiddenLocked ? undefined : counts.hidden} />
+          <Item
+            src="hidden"
+            label={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>Hidden{getState().settings?.hiddenLocked && <Lock size={11} style={{ opacity: 0.5 }} />}</span>}
+            icon={<EyeOff size={16} />}
+            count={getState().settings?.hiddenLocked ? undefined : counts.hidden}
+          />
           <Item src="deleted" label="Recently Deleted" icon={<Trash2 size={16} />} count={counts.deleted} />
         </Section>
 
@@ -254,25 +261,29 @@ export function Sidebar() {
   )
 }
 
-export function Rail() {
-  const source = useStore((s) => s.source)
-  const items: { src: string; icon: ReactNode; title: string }[] = [
-    { src: 'library', icon: <Images size={19} />, title: 'Library' },
-    { src: 'memories', icon: <Sparkles size={19} />, title: 'Memories' },
-    { src: 'favorites', icon: <Heart size={19} />, title: 'Favourites' },
-    { src: 'videos', icon: <Video size={19} />, title: 'Videos' },
-    { src: 'albums', icon: <SquareStack size={19} />, title: 'Albums' }
-  ]
+/** With the sidebar hidden, touching the window's left edge slides it in over the content. */
+export function SidebarPeek() {
+  const peek = useStore((s) => s.sidebarPeek)
+  const busy = useStore((s) => !!s.menu || !!s.sheet)
+  const timer = useRef<number>(0)
+  const show = () => {
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setState({ sidebarPeek: true }), 120)
+  }
+  const hide = () => {
+    window.clearTimeout(timer.current)
+    if (getState().menu || getState().sheet) return
+    timer.current = window.setTimeout(() => setState({ sidebarPeek: false }), 280)
+  }
+  useEffect(() => () => window.clearTimeout(timer.current), [])
   return (
-    <nav className="rail glass">
-      {items.map((i) => (
-        <button key={i.src} title={i.title} className={source === i.src ? 'active' : ''} onClick={() => navigate(i.src)}>
-          {i.icon}
-        </button>
-      ))}
-      <button title="Show Sidebar" onClick={() => setState({ sidebarCollapsed: false })}>
-        <SidebarIcon size={19} />
-      </button>
-    </nav>
+    <>
+      <div className="edge-zone" onMouseEnter={show} onMouseLeave={() => !peek && window.clearTimeout(timer.current)} />
+      {peek && (
+        <div className="peek-wrap" onMouseEnter={() => window.clearTimeout(timer.current)}>
+          <Sidebar peek onLeave={() => !busy && hide()} />
+        </div>
+      )}
+    </>
   )
 }

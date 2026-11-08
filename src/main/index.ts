@@ -11,9 +11,37 @@ import {
 } from './queries'
 import { backgroundProgress, ensurePreview, onThumbnailDone, runBackgroundThumbs, setCacheRoot } from './render'
 import { getSettings, loadSettings, setSettings, type Settings } from './settings'
+import { getEdit, revertEdit, saveEdit, setRendersDir } from './editRender'
+import { runExport, type ExportOptions } from './exporter'
+import { systemAuth, systemAuthAvailable } from './auth'
+import { readFileSync, writeFileSync } from 'node:fs'
+import type { EditRecipe } from '../shared/edits'
 
 app.setName('Photos')
 registerSchemes()
+if (!app.requestSingleInstanceLock()) app.quit()
+app.on('second-instance', () => {
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.focus()
+})
+
+interface WinState { x?: number; y?: number; width: number; height: number; maximized?: boolean }
+const winStateFile = (): string => join(app.getPath('userData'), 'window.json')
+function loadWinState(): WinState {
+  try {
+    return { width: 1440, height: 920, ...JSON.parse(readFileSync(winStateFile(), 'utf8')) }
+  } catch {
+    return { width: 1440, height: 920 }
+  }
+}
+function saveWinState(): void {
+  if (!win || win.isFullScreen()) return
+  const b = win.getNormalBounds()
+  try {
+    writeFileSync(winStateFile(), JSON.stringify({ ...b, maximized: win.isMaximized() }))
+  } catch { /* ignore */ }
+}
 
 const isMac = process.platform === 'darwin'
 let win: BrowserWindow | null = null
@@ -45,9 +73,12 @@ function applyTheme(s: Settings): void {
 
 function createWindow(): void {
   const icon = join(__dirname, '../../build/icon.png')
+  const st = loadWinState()
   win = new BrowserWindow({
-    width: 1440,
-    height: 920,
+    width: st.width,
+    height: st.height,
+    x: st.x,
+    y: st.y,
     minWidth: 920,
     minHeight: 600,
     show: false,
@@ -64,7 +95,11 @@ function createWindow(): void {
       autoplayPolicy: 'no-user-gesture-required'
     }
   })
-  win.once('ready-to-show', () => win?.show())
+  win.once('ready-to-show', () => {
+    if (st.maximized) win?.maximize()
+    win?.show()
+  })
+  win.on('close', saveWinState)
   win.on('maximize', () => send('window:state', { maximized: true }))
   win.on('unmaximize', () => send('window:state', { maximized: false }))
   win.on('enter-full-screen', () => send('window:state', { fullscreen: true }))
@@ -93,7 +128,8 @@ function buildMenu(): void {
         { type: 'separator' },
         { label: 'Import Folder…', accelerator: 'Cmd+Shift+I', click: cmd('import-folder') },
         { label: 'Import Photos…', click: cmd('import-files') },
-        { label: 'Export Unmodified Original…', accelerator: 'Cmd+Shift+E', click: cmd('export-original') },
+        { label: 'Export…', accelerator: 'Cmd+Shift+E', click: cmd('export') },
+        { label: 'Export Unmodified Original…', accelerator: 'Cmd+Alt+Shift+E', click: cmd('export-original') },
         { type: 'separator' },
         { role: 'close' }
       ]
@@ -107,6 +143,7 @@ function buildMenu(): void {
         { label: 'Hide', accelerator: 'Cmd+L', click: cmd('hide') },
         { label: 'Delete', accelerator: 'Cmd+Backspace', click: cmd('delete') },
         { type: 'separator' },
+        { label: 'Edit', accelerator: 'Cmd+E', click: cmd('edit') },
         { label: 'Get Info', accelerator: 'Cmd+I', click: cmd('info') }
       ]
     },
@@ -119,6 +156,7 @@ function buildMenu(): void {
         { label: 'All Photos', accelerator: 'Cmd+4', click: cmd('view-all') },
         { type: 'separator' },
         { label: 'Show Sidebar', accelerator: 'Cmd+Alt+S', click: cmd('toggle-sidebar') },
+        { label: 'Select', accelerator: 'Cmd+Shift+S', click: cmd('select-mode') },
         { label: 'Zoom In', accelerator: 'Cmd+=', click: cmd('zoom-in') },
         { label: 'Zoom Out', accelerator: 'Cmd+-', click: cmd('zoom-out') },
         { type: 'separator' },
@@ -176,16 +214,9 @@ function registerIpc(): void {
     libraryChanged()
   })
   ipcMain.handle('asset:text', (_e, id: number, field: 'title' | 'caption' | 'keywords', value: string) => setText(id, field, value))
+  // The renderer shows the confirmation sheet before calling this.
   ipcMain.handle('asset:purge', async (_e, ids: number[]) => {
-    const r = await dialog.showMessageBox(win!, {
-      type: 'warning',
-      buttons: ['Remove from Library', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      message: `Remove ${ids.length} item${ids.length === 1 ? '' : 's'} from the library?`,
-      detail: 'The original files stay on disk untouched. Only the library entry is removed.'
-    })
-    if (r.response !== 0) return false
+    for (const id of ids) await revertEdit(id).catch(() => undefined)
     purgeAssets(ids)
     libraryChanged()
     return true
@@ -206,6 +237,31 @@ function registerIpc(): void {
     if (r.canceled || !r.filePaths[0]) return null
     return exportAssets(ids, r.filePaths[0], mode)
   })
+
+  ipcMain.handle('export:run', async (_e, ids: number[], opts: ExportOptions) => {
+    const r = await dialog.showOpenDialog(win!, {
+      title: opts.unmodified ? 'Export Unmodified Original' : 'Export',
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: 'Export'
+    })
+    if (r.canceled || !r.filePaths[0]) return null
+    return runExport(ids, r.filePaths[0], opts, (p) => send('export:progress', p))
+  })
+
+  ipcMain.handle('edit:get', (_e, id: number) => getEdit(id))
+  ipcMain.handle('edit:save', async (_e, id: number, recipe: EditRecipe, png: Uint8Array | null, out: { w: number; h: number }) => {
+    await saveEdit(id, recipe, png, out, (p) => send('edit:progress', { id, p }))
+    libraryChanged()
+    kickThumbs()
+  })
+  ipcMain.handle('edit:revert', async (_e, id: number) => {
+    await revertEdit(id)
+    libraryChanged()
+    kickThumbs()
+  })
+
+  ipcMain.handle('auth:available', () => systemAuthAvailable())
+  ipcMain.handle('auth:verify', (_e, reason: string) => systemAuth(win, reason))
 
   ipcMain.handle('albums:list', () => listAlbums())
   ipcMain.handle('albums:create', (_e, name: string, parentId: number | null, isFolder: boolean, ids?: number[]) => {
@@ -259,7 +315,8 @@ function registerIpc(): void {
 
   ipcMain.on('window:minimize', () => win?.minimize())
   ipcMain.on('window:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
-  ipcMain.on('window:fullscreen', () => win?.setFullScreen(!win.isFullScreen()))
+  ipcMain.on('window:fullscreen', (_e, on?: boolean) => win?.setFullScreen(on ?? !win.isFullScreen()))
+  ipcMain.handle('window:isFullscreen', () => !!win?.isFullScreen())
   ipcMain.on('window:close', () => win?.close())
 }
 
@@ -267,6 +324,7 @@ app.whenReady().then(async () => {
   libraryDir = process.env.PHOTOS_LIBRARY ?? join(app.getPath('userData'), 'Library')
   openDb(libraryDir)
   setCacheRoot(join(libraryDir, 'Cache'))
+  setRendersDir(join(libraryDir, 'Renders'))
   applyTheme(loadSettings(libraryDir))
   handleMediaProtocol()
   registerIpc()

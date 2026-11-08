@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Folder, Images, Plus, Lock, Download, ChevronLeft } from 'lucide-react'
-import { thumbUrl } from '../api'
+import { api, thumbUrl } from '../api'
 import { albumMenu, promptNewAlbum } from '../actions'
-import { getState, navigate, refreshAll, setState, useStore } from '../store'
+import { navigate, refreshAll, setState, useStore } from '../store'
 import type { Album } from '../types'
 import { formatDay, plural } from '../util'
 import { openMenu } from './Menu'
@@ -109,20 +109,47 @@ export function EmptyLibrary() {
   )
 }
 
-export function HiddenLock({ onUnlock }: { onUnlock: () => void }) {
+const systemLockName = api.platform === 'darwin' ? 'Touch ID' : 'Windows Hello'
+
+/** Asks the OS (Windows Hello / Touch ID) to verify the user; falls back to a click when no system lock exists. */
+export async function unlockHidden(): Promise<boolean> {
+  const r = await api.authVerify('Photos wants to show your Hidden album.')
+  if (r === 'ok' || r === 'unavailable') {
+    setState({ hiddenUnlocked: true })
+    return true
+  }
+  return false
+}
+
+export function HiddenLock() {
+  const [available, setAvailable] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    api.authAvailable().then(setAvailable)
+  }, [])
+  const go = async () => {
+    setBusy(true)
+    setFailed(false)
+    const ok = await unlockHidden()
+    setBusy(false)
+    if (!ok) setFailed(true)
+  }
   return (
     <div className="hidden-lock">
       <div>
-        <div className="lock-ic glass"><Lock size={30} /></div>
+        <div className={`lock-ic glass${failed ? ' shake' : ''}`} key={String(failed)}><Lock size={30} /></div>
         <h2 style={{ margin: '0 0 6px', fontFamily: 'var(--font-display)' }}>Hidden Album is Locked</h2>
-        <p style={{ color: 'var(--text-2)', margin: '0 0 16px' }}>Hidden photos don't appear in your library, albums or memories.</p>
-        <button className="btn primary" onClick={onUnlock}>View Album</button>
+        <p style={{ color: 'var(--text-2)', margin: '0 0 16px', maxWidth: 380 }}>
+          {available === false
+            ? `Set up ${systemLockName} in your system settings to protect this album. Until then it opens with a click.`
+            : `Use ${systemLockName} to view this album. It locks again when you leave it.`}
+        </p>
+        <button className="btn primary" disabled={busy} onClick={go}>
+          {busy ? 'Waiting for verification…' : available === false ? 'View Album' : `Unlock with ${systemLockName}`}
+        </button>
+        {failed && <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 10 }}>Verification was cancelled.</p>}
       </div>
     </div>
   )
-}
-
-export function useHiddenUnlock(): [boolean, () => void] {
-  const [unlocked, setUnlocked] = useState(false)
-  return [unlocked || !getState().settings?.hiddenLocked, () => setUnlocked(true)]
 }

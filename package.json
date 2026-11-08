@@ -13,6 +13,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs",
     "dist:win": "electron-vite build && electron-builder --win",
     "dist:mac": "electron-vite build && electron-builder --mac"
   },
@@ -22,7 +23,11 @@
     "directories": { "output": "release", "buildResources": "build" },
     "files": ["out/**/*", "build/icon.png", "package.json"],
     "asarUnpack": ["node_modules/@ffmpeg-installer/**", "node_modules/ffprobe-static/**", "node_modules/sharp/**", "node_modules/@img/**"],
-    "win": { "target": ["nsis"], "icon": "build/icon.ico" },
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico",
+      "extraResources": [{ "from": "vendor/ffmpeg", "to": "ffmpeg", "filter": ["ffmpeg.exe", "ffprobe.exe"] }]
+    },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
     "mac": { "target": ["dmg"], "icon": "build/icon.png", "category": "public.app-category.photography" }
   },
