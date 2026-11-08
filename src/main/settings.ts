@@ -9,6 +9,8 @@ export interface Settings {
   showLiveBadges: boolean
   showInfoOverlays: boolean
   reduceTransparency: boolean
+  /** 0 = frosted, 1 = clear refractive liquid glass. */
+  glassIntensity: number
   appearance: 'dark' | 'light' | 'system'
   sidebarCollapsed: boolean
   zoom: number
@@ -45,6 +47,7 @@ export const DEFAULTS: Settings = {
   showLiveBadges: true,
   showInfoOverlays: true,
   reduceTransparency: false,
+  glassIntensity: 1,
   appearance: 'dark',
   sidebarCollapsed: false,
   zoom: 5,

@@ -202,6 +202,10 @@ function SettingsSheet() {
             />
           </div>
           <Row label="Reduce Transparency" sub="Use solid backgrounds instead of glass." k="reduceTransparency" />
+          <div className="row">
+            <div className="rl">Liquid Glass<small>Left is frosted. Right is clear refractive glass — photos show through, like looking through a lens.</small></div>
+            <Slider className="settings-slider" min={0} max={1} value={s.glassIntensity ?? 1} reset={1} disabled={s.reduceTransparency} onChange={(v) => updateSettings({ glassIntensity: v })} />
+          </div>
         </div>
 
         <div className="group-title">Library</div>

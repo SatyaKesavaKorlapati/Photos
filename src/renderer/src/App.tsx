@@ -22,6 +22,7 @@ import { startPick, Toolbar, TrafficLights } from './components/TitleBar'
 import { Viewer } from './components/Viewer'
 import { Editor } from './editor/Editor'
 import { ShareLayer, openShare } from './components/Share'
+import { GlassFilters } from './components/GlassFilters'
 
 function FloatHeader({ range }: { range: [number, number] | null }) {
   if (!range) return null
@@ -153,11 +154,36 @@ function Content({ onRange, range }: { onRange: (r: [number, number] | null) => 
   return <PhotoGrid key={source} items={items} scrollToEnd={!source.startsWith('search:') && source !== 'duplicates'} emptyText={empty} onVisibleRange={onRange} />
 }
 
-function applyTheme(appearance: string, reduce: boolean, motion: boolean) {
+function applyTheme(appearance: string, reduce: boolean, motion: boolean, glassIntensity = 1) {
   const dark = appearance === 'system' ? window.matchMedia('(prefers-color-scheme: dark)').matches : appearance === 'dark'
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-  document.documentElement.dataset.reduce = String(reduce)
-  document.documentElement.dataset.motion = motion ? 'reduced' : 'full'
+  const gi = reduce ? 0 : Math.max(0, Math.min(1, glassIntensity))
+  const root = document.documentElement
+  root.dataset.theme = dark ? 'dark' : 'light'
+  root.dataset.reduce = String(reduce)
+  root.dataset.motion = motion ? 'reduced' : 'full'
+  root.style.setProperty('--gi', String(gi))
+  root.style.setProperty('--g-blur', `${(28 * (1 - gi) + 3.5 * gi).toFixed(1)}px`)
+  root.style.setProperty('--g-sat', `${Math.round(130 + 110 * gi)}%`)
+  root.style.setProperty('--g-br', (dark ? 1.06 + 0.14 * gi : 1.12 + 0.1 * gi).toFixed(3))
+  root.style.setProperty('--g-refract', (reduce ? 0 : 4 + 24 * gi).toFixed(1))
+  const fill = (frost: number, clear: number) => (frost * (1 - gi) + clear * gi).toFixed(3)
+  if (dark) {
+    root.style.setProperty('--glass', `rgba(255, 255, 255, ${fill(0.1, 0.02)})`)
+    root.style.setProperty('--glass-2', `rgba(255, 255, 255, ${fill(0.14, 0.03)})`)
+    root.style.setProperty('--glass-3', `rgba(14, 14, 18, ${fill(0.42, 0.06)})`)
+    root.style.setProperty('--pill', `rgba(255, 255, 255, ${fill(0.14, 0.05)})`)
+    root.style.setProperty('--pill-active', `rgba(255, 255, 255, ${fill(0.28, 0.1)})`)
+    root.style.setProperty('--glass-border', `rgba(255, 255, 255, ${fill(0.18, 0.32)})`)
+    root.style.setProperty('--glass-edge', `rgba(255, 255, 255, ${fill(0.28, 0.55)})`)
+  } else {
+    root.style.setProperty('--glass', `rgba(255, 255, 255, ${fill(0.48, 0.03)})`)
+    root.style.setProperty('--glass-2', `rgba(255, 255, 255, ${fill(0.56, 0.05)})`)
+    root.style.setProperty('--glass-3', `rgba(255, 255, 255, ${fill(0.7, 0.07)})`)
+    root.style.setProperty('--pill', `rgba(255, 255, 255, ${fill(0.35, 0.08)})`)
+    root.style.setProperty('--pill-active', `rgba(255, 255, 255, ${fill(0.72, 0.14)})`)
+    root.style.setProperty('--glass-border', `rgba(255, 255, 255, ${fill(0.45, 0.55)})`)
+    root.style.setProperty('--glass-edge', `rgba(255, 255, 255, ${fill(0.7, 0.9)})`)
+  }
 }
 
 export default function App() {
@@ -213,12 +239,12 @@ export default function App() {
 
   useEffect(() => {
     if (!settings) return
-    applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion)
+    applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion, settings.glassIntensity ?? 1)
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const on = () => applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion)
+    const on = () => applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion, settings.glassIntensity ?? 1)
     mq.addEventListener('change', on)
     return () => mq.removeEventListener('change', on)
-  }, [settings?.appearance, settings?.reduceTransparency, settings?.reduceMotion])
+  }, [settings?.appearance, settings?.reduceTransparency, settings?.reduceMotion, settings?.glassIntensity])
 
   useEffect(() => {
     if (settings && settings.sidebarCollapsed !== collapsed) updateSettings({ sidebarCollapsed: collapsed })
@@ -265,6 +291,7 @@ export default function App() {
 
   return (
     <>
+      <GlassFilters scale={settings?.reduceTransparency ? 0 : 5 + 27 * (settings?.glassIntensity ?? 1)} />
       <div className="ambient" style={{ backgroundImage: 'var(--ambient-image)' }} />
       <div
         className={`app${collapsed ? ' compact' : ''}${fullscreen ? ' fullscreen' : ''}`}

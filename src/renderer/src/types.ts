@@ -91,6 +91,7 @@ export interface Settings {
   showLiveBadges: boolean
   showInfoOverlays: boolean
   reduceTransparency: boolean
+  glassIntensity: number
   appearance: 'dark' | 'light' | 'system'
   sidebarCollapsed: boolean
   zoom: number
