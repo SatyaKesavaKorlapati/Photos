@@ -266,21 +266,42 @@ export function SidebarPeek() {
   const peek = useStore((s) => s.sidebarPeek)
   const busy = useStore((s) => !!s.menu || !!s.sheet)
   const timer = useRef<number>(0)
-  const show = () => {
+  const hiding = useRef(false)
+  const cancel = () => {
     window.clearTimeout(timer.current)
+    hiding.current = false
+  }
+  const show = () => {
+    cancel()
     timer.current = window.setTimeout(() => setState({ sidebarPeek: true }), 120)
   }
   const hide = () => {
+    if (hiding.current || getState().menu || getState().sheet) return
     window.clearTimeout(timer.current)
-    if (getState().menu || getState().sheet) return
-    timer.current = window.setTimeout(() => setState({ sidebarPeek: false }), 280)
+    hiding.current = true
+    timer.current = window.setTimeout(() => {
+      hiding.current = false
+      setState({ sidebarPeek: false })
+    }, 280)
   }
   useEffect(() => () => window.clearTimeout(timer.current), [])
+  const wrap = useRef<HTMLDivElement>(null)
+  // mouseleave alone misses a pointer that never entered the panel (it slid in underneath it), so track position too.
+  useEffect(() => {
+    if (!peek) return
+    const on = (e: PointerEvent) => {
+      const right = wrap.current?.getBoundingClientRect().right ?? 0
+      if (e.clientX > right + 16) hide()
+      else if (e.clientX <= right) cancel()
+    }
+    window.addEventListener('pointermove', on, { passive: true })
+    return () => window.removeEventListener('pointermove', on)
+  }, [peek])
   return (
     <>
-      <div className="edge-zone" onMouseEnter={show} onMouseLeave={() => !peek && window.clearTimeout(timer.current)} />
+      <div className="edge-zone" onMouseEnter={show} onMouseLeave={() => !peek && cancel()} />
       {peek && (
-        <div className="peek-wrap" onMouseEnter={() => window.clearTimeout(timer.current)}>
+        <div className="peek-wrap" ref={wrap} onMouseEnter={cancel}>
           <Sidebar peek onLeave={() => !busy && hide()} />
         </div>
       )}

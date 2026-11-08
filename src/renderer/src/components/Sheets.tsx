@@ -255,7 +255,7 @@ function ConfirmSheet({ sheet }: { sheet: Extract<Sheet, { kind: 'confirm' }> })
   return (
     <Backdrop onClose={cancel}>
       <div className="alert">
-        <div className={`alert-ic${sheet.danger ? ' danger' : ''}`}>{sheet.danger ? <Trash2 size={22} /> : <AlertTriangle size={22} />}</div>
+        <div className={`alert-ic${sheet.danger ? ' danger' : ''}`}>{sheet.icon ?? (sheet.danger ? <Trash2 size={22} /> : <AlertTriangle size={22} />)}</div>
         <h3>{sheet.title}</h3>
         <p>{sheet.message}</p>
         <div className="alert-actions">

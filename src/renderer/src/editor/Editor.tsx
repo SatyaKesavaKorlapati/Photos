@@ -357,7 +357,7 @@ export function Editor() {
 
   const close = useCallback(() => setState({ editor: null }), [])
   const cancel = useCallback(async () => {
-    if (dirty && !(await confirmSheet({ title: 'Discard Changes?', message: 'Your edits to this item will be lost.', confirm: 'Discard Changes', danger: true }))) return
+    if (dirty && !(await confirmSheet({ title: 'Discard Changes?', message: 'Your edits to this item will be lost.', confirm: 'Discard Changes', danger: true, icon: <Undo2 size={22} /> }))) return
     close()
   }, [dirty, close])
 
@@ -399,7 +399,8 @@ export function Editor() {
       title: 'Revert to Original?',
       message: 'All edits made in Photos are removed. The original file was never modified.',
       confirm: 'Revert to Original',
-      danger: true
+      danger: true,
+      icon: <RotateCcw size={22} />
     })
     if (!ok) return
     await api.revertEdit(id)

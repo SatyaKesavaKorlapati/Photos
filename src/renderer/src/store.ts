@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useSyncExternalStore, type ReactNode } from 'react'
 import { api, setEditVersions } from './api'
 import type { Album, FolderEntry, GridAsset, ImportEntry, ImportProgress, LibraryView, Settings, ShowFilter, ThumbProgress } from './types'
 
@@ -36,7 +36,7 @@ export type Sheet =
   | { kind: 'import'; folders?: string[]; files?: string[] }
   | { kind: 'settings' }
   | { kind: 'prompt'; title: string; placeholder: string; confirm: string; initial?: string; onSubmit: (v: string) => void }
-  | { kind: 'confirm'; title: string; message: string; confirm: string; danger?: boolean; onConfirm: () => void; onCancel?: () => void }
+  | { kind: 'confirm'; title: string; message: string; confirm: string; danger?: boolean; icon?: ReactNode; onConfirm: () => void; onCancel?: () => void }
   | { kind: 'export'; ids: number[]; unmodified?: boolean }
   | { kind: 'shortcuts' }
   | null
@@ -150,7 +150,7 @@ export function toast(text: string, action?: Toast['action']): void {
 }
 
 /** Apple-style confirmation sheet; resolves true when the user confirms. */
-export function confirmSheet(opts: { title: string; message: string; confirm: string; danger?: boolean }): Promise<boolean> {
+export function confirmSheet(opts: { title: string; message: string; confirm: string; danger?: boolean; icon?: ReactNode }): Promise<boolean> {
   return new Promise((resolve) => {
     setState({ sheet: { kind: 'confirm', ...opts, onConfirm: () => resolve(true), onCancel: () => resolve(false) } })
   })

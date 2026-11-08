@@ -382,6 +382,7 @@ export function PhotoGrid({
   }, [viewerOpen])
 
   const vItems = virt.getVirtualItems()
+  const anchorLayout = useRef({ cols, items })
   useEffect(() => {
     if (!vItems.length) {
       onVisibleRange?.(null)
@@ -390,7 +391,10 @@ export function PhotoGrid({
     const top = (parentRef.current?.scrollTop ?? 0) + GRID_TOP
     const first = vItems.find((v) => v.end > top) ?? vItems[0]
     const startIdx = first.index * cols
-    anchorRef.current = items[startIdx]?.id ?? null
+    // Right after a relayout the scroll offset still belongs to the old layout, so it would name the wrong photo.
+    const relayout = anchorLayout.current.cols !== cols || anchorLayout.current.items !== items
+    anchorLayout.current = { cols, items }
+    if (!relayout) anchorRef.current = items[startIdx]?.id ?? null
     const viewH = parentRef.current?.clientHeight ?? 0
     const bottom = (parentRef.current?.scrollTop ?? 0) + viewH - GRID_BOTTOM
     const lastRow = [...vItems].reverse().find((v) => v.start < bottom) ?? vItems[vItems.length - 1]
