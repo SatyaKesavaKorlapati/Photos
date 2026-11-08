@@ -92,6 +92,7 @@ export interface Settings {
   showInfoOverlays: boolean
   reduceTransparency: boolean
   glassIntensity: number
+  glassPanels: number
   appearance: 'dark' | 'light' | 'system'
   sidebarCollapsed: boolean
   zoom: number

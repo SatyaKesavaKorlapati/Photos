@@ -11,6 +11,15 @@ import { ConnectionsSheet } from './Share'
 const close = () => setState({ sheet: null })
 
 function Backdrop({ children, onClose = close }: { children: React.ReactNode; onClose?: () => void }) {
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      onClose()
+    }
+    window.addEventListener('keydown', on)
+    return () => window.removeEventListener('keydown', on)
+  }, [onClose])
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       {children}
@@ -203,8 +212,12 @@ function SettingsSheet() {
           </div>
           <Row label="Reduce Transparency" sub="Use solid backgrounds instead of glass." k="reduceTransparency" />
           <div className="row">
-            <div className="rl">Liquid Glass<small>Left is frosted. Right is clear refractive glass — photos show through, like looking through a lens.</small></div>
+            <div className="rl">Liquid Glass · Controls<small>Toolbar, search, share sheet and popups. Left is frosted, right is clear glass.</small></div>
             <Slider className="settings-slider" min={0} max={1} value={s.glassIntensity ?? 1} reset={1} disabled={s.reduceTransparency} onChange={(v) => updateSettings({ glassIntensity: v })} />
+          </div>
+          <div className="row">
+            <div className="rl">Liquid Glass · Sidebar & Settings<small>The sidebar and this settings sheet, separate from the rest of the chrome.</small></div>
+            <Slider className="settings-slider" min={0} max={1} value={s.glassPanels ?? 0.68} reset={0.68} disabled={s.reduceTransparency} onChange={(v) => updateSettings({ glassPanels: v })} />
           </div>
         </div>
 

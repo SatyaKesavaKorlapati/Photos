@@ -148,8 +148,25 @@ function createWindow(): void {
     win?.show()
     const shotDir = process.env.PHOTOS_SHOT
     if (shotDir) {
+      const shot = async (name: string) => {
+        const img = await win?.webContents.capturePage()
+        if (img) await writeFile(join(shotDir, name), img.toPNG())
+      }
+      const js = (code: string) => win?.webContents.executeJavaScript(code)
       setTimeout(() => {
-        win?.webContents.capturePage().then((img) => writeFile(join(shotDir, 'shot.png'), img.toPNG())).catch(() => undefined)
+        void (async () => {
+          try {
+            await shot('shot.png')
+            await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:',',ctrlKey:true,bubbles:true}))`)
+            await new Promise((r) => setTimeout(r, 900))
+            await shot('shot-settings.png')
+            await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`)
+            await new Promise((r) => setTimeout(r, 400))
+            await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:true,altKey:true,bubbles:true}))`)
+            await new Promise((r) => setTimeout(r, 900))
+            await shot('shot-collapsed.png')
+          } catch { /* ignore */ }
+        })()
       }, 1800)
     }
   })

@@ -17,7 +17,7 @@ import { Memories, Slideshow } from './components/Memories'
 import { MenuLayer, openMenu } from './components/Menu'
 import { AlbumsPage, EmptyLibrary, HiddenLock, ImportsPage } from './components/Pages'
 import { SheetLayer } from './components/Sheets'
-import { Sidebar, SidebarPeek } from './components/Sidebar'
+import { disarmPeek, Sidebar, SidebarPeek } from './components/Sidebar'
 import { startPick, Toolbar, TrafficLights } from './components/TitleBar'
 import { Viewer } from './components/Viewer'
 import { Editor } from './editor/Editor'
@@ -154,36 +154,46 @@ function Content({ onRange, range }: { onRange: (r: [number, number] | null) => 
   return <PhotoGrid key={source} items={items} scrollToEnd={!source.startsWith('search:') && source !== 'duplicates'} emptyText={empty} onVisibleRange={onRange} />
 }
 
-function applyTheme(appearance: string, reduce: boolean, motion: boolean, glassIntensity = 1) {
+function writeGlass(root: HTMLElement, gi: number, dark: boolean, suffix: '' | '-panel') {
+  const fill = (frost: number, clear: number) => (frost * (1 - gi) + clear * gi).toFixed(3)
+  const panel = suffix === '-panel'
+  const blur = (panel ? 26 * (1 - gi) + 8 * gi : 24 * (1 - gi) + 2.4 * gi).toFixed(1)
+  const sat = Math.round(panel ? 140 + 50 * gi : 130 + 110 * gi)
+  const br = (dark ? 1.06 + 0.1 * gi : 1.1 + 0.08 * gi).toFixed(3)
+  root.style.setProperty(`--gi${suffix}`, String(gi))
+  root.style.setProperty(`--g-blur${suffix}`, `${blur}px`)
+  root.style.setProperty(`--g-sat${suffix}`, `${sat}%`)
+  root.style.setProperty(`--g-br${suffix}`, br)
+  root.style.setProperty(`--blur${suffix}`, `blur(${blur}px) saturate(${sat}%) brightness(${br}) contrast(1.06)`)
+  if (dark) {
+    root.style.setProperty(`--glass${suffix}`, `rgba(255, 255, 255, ${fill(0.1, panel ? 0.045 : 0.02)})`)
+    root.style.setProperty(`--glass-2${suffix}`, `rgba(255, 255, 255, ${fill(0.14, panel ? 0.06 : 0.03)})`)
+    root.style.setProperty(`--glass-3${suffix}`, `rgba(14, 14, 18, ${fill(0.5, panel ? 0.18 : 0.06)})`)
+    root.style.setProperty(`--glass-border${suffix}`, `rgba(255, 255, 255, ${fill(0.18, 0.32)})`)
+    root.style.setProperty(`--glass-edge${suffix}`, `rgba(255, 255, 255, ${fill(0.28, 0.55)})`)
+    root.style.setProperty(`--pill${suffix}`, `rgba(255, 255, 255, ${fill(0.16, panel ? 0.08 : 0.05)})`)
+    root.style.setProperty(`--pill-active${suffix}`, `rgba(255, 255, 255, ${fill(0.3, panel ? 0.14 : 0.1)})`)
+  } else {
+    root.style.setProperty(`--glass${suffix}`, `rgba(255, 255, 255, ${fill(0.48, panel ? 0.1 : 0.03)})`)
+    root.style.setProperty(`--glass-2${suffix}`, `rgba(255, 255, 255, ${fill(0.56, panel ? 0.14 : 0.05)})`)
+    root.style.setProperty(`--glass-3${suffix}`, `rgba(255, 255, 255, ${fill(0.78, panel ? 0.22 : 0.08)})`)
+    root.style.setProperty(`--glass-border${suffix}`, `rgba(255, 255, 255, ${fill(0.45, 0.55)})`)
+    root.style.setProperty(`--glass-edge${suffix}`, `rgba(255, 255, 255, ${fill(0.7, 0.9)})`)
+    root.style.setProperty(`--pill${suffix}`, `rgba(255, 255, 255, ${fill(0.4, panel ? 0.16 : 0.08)})`)
+    root.style.setProperty(`--pill-active${suffix}`, `rgba(255, 255, 255, ${fill(0.72, panel ? 0.22 : 0.14)})`)
+  }
+}
+
+function applyTheme(appearance: string, reduce: boolean, motion: boolean, chrome = 1, panels = 0.68) {
   const dark = appearance === 'system' ? window.matchMedia('(prefers-color-scheme: dark)').matches : appearance === 'dark'
-  const gi = reduce ? 0 : Math.max(0, Math.min(1, glassIntensity))
   const root = document.documentElement
   root.dataset.theme = dark ? 'dark' : 'light'
   root.dataset.reduce = String(reduce)
   root.dataset.motion = motion ? 'reduced' : 'full'
-  root.style.setProperty('--gi', String(gi))
-  root.style.setProperty('--g-blur', `${(28 * (1 - gi) + 3.5 * gi).toFixed(1)}px`)
-  root.style.setProperty('--g-sat', `${Math.round(130 + 110 * gi)}%`)
-  root.style.setProperty('--g-br', (dark ? 1.06 + 0.14 * gi : 1.12 + 0.1 * gi).toFixed(3))
-  root.style.setProperty('--g-refract', (reduce ? 0 : 4 + 24 * gi).toFixed(1))
-  const fill = (frost: number, clear: number) => (frost * (1 - gi) + clear * gi).toFixed(3)
-  if (dark) {
-    root.style.setProperty('--glass', `rgba(255, 255, 255, ${fill(0.1, 0.02)})`)
-    root.style.setProperty('--glass-2', `rgba(255, 255, 255, ${fill(0.14, 0.03)})`)
-    root.style.setProperty('--glass-3', `rgba(14, 14, 18, ${fill(0.42, 0.06)})`)
-    root.style.setProperty('--pill', `rgba(255, 255, 255, ${fill(0.14, 0.05)})`)
-    root.style.setProperty('--pill-active', `rgba(255, 255, 255, ${fill(0.28, 0.1)})`)
-    root.style.setProperty('--glass-border', `rgba(255, 255, 255, ${fill(0.18, 0.32)})`)
-    root.style.setProperty('--glass-edge', `rgba(255, 255, 255, ${fill(0.28, 0.55)})`)
-  } else {
-    root.style.setProperty('--glass', `rgba(255, 255, 255, ${fill(0.48, 0.03)})`)
-    root.style.setProperty('--glass-2', `rgba(255, 255, 255, ${fill(0.56, 0.05)})`)
-    root.style.setProperty('--glass-3', `rgba(255, 255, 255, ${fill(0.7, 0.07)})`)
-    root.style.setProperty('--pill', `rgba(255, 255, 255, ${fill(0.35, 0.08)})`)
-    root.style.setProperty('--pill-active', `rgba(255, 255, 255, ${fill(0.72, 0.14)})`)
-    root.style.setProperty('--glass-border', `rgba(255, 255, 255, ${fill(0.45, 0.55)})`)
-    root.style.setProperty('--glass-edge', `rgba(255, 255, 255, ${fill(0.7, 0.9)})`)
-  }
+  const gi = reduce ? 0 : Math.max(0, Math.min(1, chrome))
+  const gp = reduce ? 0 : Math.max(0, Math.min(1, panels))
+  writeGlass(root, gi, dark, '')
+  writeGlass(root, gp, dark, '-panel')
 }
 
 export default function App() {
@@ -239,16 +249,16 @@ export default function App() {
 
   useEffect(() => {
     if (!settings) return
-    applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion, settings.glassIntensity ?? 1)
+    applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion, settings.glassIntensity ?? 1, settings.glassPanels ?? 0.68)
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const on = () => applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion, settings.glassIntensity ?? 1)
+    const on = () => applyTheme(settings.appearance, settings.reduceTransparency, settings.reduceMotion, settings.glassIntensity ?? 1, settings.glassPanels ?? 0.68)
     mq.addEventListener('change', on)
     return () => mq.removeEventListener('change', on)
-  }, [settings?.appearance, settings?.reduceTransparency, settings?.reduceMotion, settings?.glassIntensity])
+  }, [settings?.appearance, settings?.reduceTransparency, settings?.reduceMotion, settings?.glassIntensity, settings?.glassPanels])
 
   useEffect(() => {
     if (settings && settings.sidebarCollapsed !== collapsed) updateSettings({ sidebarCollapsed: collapsed })
-  }, [collapsed])
+  }, [collapsed, settings?.sidebarCollapsed])
 
   // The blurred backdrop follows the newest photo in view, like visionOS.
   useEffect(() => {
@@ -373,7 +383,12 @@ function runCommand(c: string): void {
     case 'import-files': startPick('files'); break
     case 'new-album': promptNewAlbum(ids); break
     case 'new-folder': promptNewAlbum([], true); break
-    case 'toggle-sidebar': setState({ sidebarCollapsed: !s.sidebarCollapsed, sidebarPeek: false }); break
+    case 'toggle-sidebar': {
+      const next = !s.sidebarCollapsed
+      if (next) disarmPeek()
+      setState({ sidebarCollapsed: next, sidebarPeek: false })
+      break
+    }
     case 'select-mode': setState({ selectMode: !s.selectMode, selection: new Set() }); break
     case 'zoom-in': setState({ zoom: Math.max(1, s.zoom - 1) }); break
     case 'zoom-out': setState({ zoom: Math.min(9, s.zoom + 1) }); break

@@ -7,10 +7,19 @@
   --bg: #121214;
   --ambient-opacity: 0.55;
   --gi: 1;
+  --gi-panel: 0.55;
   --g-blur: 5px;
   --g-sat: 210%;
   --g-br: 1.16;
   --g-refract: 32;
+  --blur-panel: blur(14px) saturate(170%) brightness(1.1) contrast(1.06);
+  --glass-panel: rgba(255, 255, 255, 0.06);
+  --glass-2-panel: rgba(255, 255, 255, 0.09);
+  --glass-3-panel: rgba(14, 14, 18, 0.22);
+  --glass-border-panel: rgba(255, 255, 255, 0.24);
+  --glass-edge-panel: rgba(255, 255, 255, 0.4);
+  --pill-panel: rgba(255, 255, 255, 0.1);
+  --pill-active-panel: rgba(255, 255, 255, 0.2);
   --glass: rgba(255, 255, 255, 0.03);
   --glass-2: rgba(255, 255, 255, 0.045);
   --glass-3: rgba(14, 14, 18, 0.1);
@@ -75,10 +84,14 @@
 
 [data-reduce='true'] {
   --blur: none;
+  --blur-panel: none;
   --g-refract: 0;
   --glass: var(--glass-solid);
   --glass-2: var(--glass-solid);
   --glass-3: var(--glass-solid);
+  --glass-panel: var(--glass-solid);
+  --glass-2-panel: var(--glass-solid);
+  --glass-3-panel: var(--glass-solid);
 }
 
 * { box-sizing: border-box; }
@@ -132,6 +145,17 @@ img { -webkit-user-drag: none; }
     inset -2px 0 5px rgba(255, 140, 220, calc(var(--gi) * 0.16));
   transition: background 0.35s var(--ease), box-shadow 0.35s;
 }
+.sidebar, .sheet, .info-panel, .share-sheet {
+  --gi: var(--gi-panel);
+  --blur: var(--blur-panel);
+  --glass: var(--glass-panel);
+  --glass-2: var(--glass-2-panel);
+  --glass-3: var(--glass-3-panel);
+  --glass-border: var(--glass-border-panel);
+  --glass-edge: var(--glass-edge-panel);
+  --pill: var(--pill-panel);
+  --pill-active: var(--pill-active-panel);
+}
 
 /* ---------- App frame ---------- */
 .ambient {
@@ -164,9 +188,10 @@ img { -webkit-user-drag: none; }
   flex: none;
   width: 252px;
   overflow: hidden;
-  z-index: 20;
+  z-index: 40;
   margin-right: -96px;
   transition: width 0.52s var(--ease), margin 0.52s var(--ease);
+  -webkit-app-region: no-drag;
 }
 .sb-slot .sidebar {
   width: 252px;
@@ -220,8 +245,10 @@ img { -webkit-user-drag: none; }
   flex-direction: column;
   overflow: hidden;
   transition: width 0.42s var(--ease), opacity 0.3s;
+  -webkit-app-region: no-drag;
 }
-.sidebar-top { height: 54px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 16px; }
+.sidebar-top { height: 54px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 16px; -webkit-app-region: no-drag; }
+.sb-pin { width: 36px; height: 36px; position: relative; z-index: 8; -webkit-app-region: no-drag; }
 .sidebar-scroll { flex: 1; overflow-y: auto; padding: 0 10px 12px; }
 .sidebar-scroll::-webkit-scrollbar { width: 8px; }
 .sb-section { margin-top: 14px; }
@@ -293,6 +320,7 @@ img { -webkit-user-drag: none; }
   padding: 0 12px 6px 14px;
   pointer-events: auto;
 }
+.toolbar:not(.wide) { padding-left: 108px; }
 .toolbar::before { display: none; }
 .toolbar .sb-toggle { width: 36px; height: 36px; padding: 0; flex: none; }
 .toolbar .title-block { min-width: 0; margin-right: auto; padding-left: 4px; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.25); }
@@ -644,7 +672,15 @@ img { -webkit-user-drag: none; }
   animation: sheet-in 0.42s var(--spring);
 }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(16px) scale(0.97); } }
-.sheet h2 { margin: 0 0 4px; font-family: var(--font-display); font-size: 21px; font-weight: 700; letter-spacing: -0.02em; }
+.sheet h2 { margin: 0 0 4px; font-family: var(--font-display); font-size: 21px; font-weight: 700; letter-spacing: -0.02em; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.35); }
+.sheet .rl, .sheet .group-title, .sheet p, .sheet .row { text-shadow: 0 1px 8px rgba(0, 0, 0, 0.32); }
+[data-theme='light'] .sheet h2, [data-theme='light'] .sheet .rl, [data-theme='light'] .sheet .group-title, [data-theme='light'] .sheet p {
+  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.7);
+}
+.sidebar .sb-item, .sidebar .sb-heading, .sb-footer { text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4); }
+[data-theme='light'] .sidebar .sb-item, [data-theme='light'] .sidebar .sb-heading, [data-theme='light'] .sb-footer {
+  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.55);
+}
 .sheet p.lead { margin: 0 0 18px; color: var(--text-2); line-height: 1.45; }
 .sheet .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 .btn {

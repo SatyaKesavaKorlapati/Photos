@@ -203,12 +203,20 @@ export function Sidebar({ peek = false, onLeave }: { peek?: boolean; onLeave?: (
   const folders = useStore((s) => s.folders)
   return (
     <aside className={`sidebar glass${peek ? ' peek' : ''}`} onMouseLeave={onLeave}>
-      <div className="sidebar-top drag">
-        <div style={{ width: 76 }} />
+      <div className="sidebar-top no-drag">
+        <div className="drag" style={{ width: 76, height: '100%' }} />
         <button
-          className="tb-btn no-drag"
+          type="button"
+          className="tb-btn no-drag sb-pin"
           title={peek ? 'Keep Sidebar Open' : 'Hide Sidebar'}
-          onClick={() => setState({ sidebarCollapsed: !peek, sidebarPeek: false })}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            const next = !peek
+            if (next) disarmPeek()
+            setState({ sidebarCollapsed: next, sidebarPeek: false })
+          }}
         >
           <SidebarIcon />
         </button>
@@ -265,6 +273,11 @@ export function Sidebar({ peek = false, onLeave }: { peek?: boolean; onLeave?: (
   )
 }
 
+let peekArmedAt = 0
+export function disarmPeek(ms = 900): void {
+  peekArmedAt = Date.now() + ms
+}
+
 /** With the sidebar hidden, touching the window's left edge slides it in over the content. */
 export function SidebarPeek() {
   const peek = useStore((s) => s.sidebarPeek)
@@ -276,6 +289,7 @@ export function SidebarPeek() {
     hiding.current = false
   }
   const show = () => {
+    if (Date.now() < peekArmedAt) return
     cancel()
     timer.current = window.setTimeout(() => setState({ sidebarPeek: true }), 120)
   }

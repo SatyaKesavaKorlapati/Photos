@@ -9,6 +9,7 @@ import { countLabel, rangeLabel } from '../util'
 import { openMenu } from './Menu'
 import { SidebarIcon } from './Icons'
 import { Slider } from './Controls'
+import { disarmPeek } from './Sidebar'
 
 /**
  * Window controls in a glass bubble. Hidden until the pointer is pushed right into the window's
@@ -207,11 +208,18 @@ export function Toolbar({ visibleRange }: { visibleRange: [number, number] | nul
 
   return (
     <header className={`toolbar drag${collapsed ? ' wide' : ''}`} onDoubleClick={(e) => e.target === e.currentTarget && api.win.maximize()}>
-      {collapsed && (
-        <button className="tb-btn glass sb-toggle no-drag" title={`Show Sidebar (${isMac ? '⌥⌘S' : 'Ctrl+Alt+S'})`} onClick={() => setState({ sidebarCollapsed: false })}>
-          <SidebarIcon />
-        </button>
-      )}
+      <button
+        type="button"
+        className="tb-btn glass sb-toggle no-drag"
+        title={collapsed ? `Show Sidebar (${isMac ? '⌥⌘S' : 'Ctrl+Alt+S'})` : `Hide Sidebar (${isMac ? '⌥⌘S' : 'Ctrl+Alt+S'})`}
+        onClick={() => {
+          const next = !collapsed
+          if (next) disarmPeek()
+          setState({ sidebarCollapsed: next, sidebarPeek: false })
+        }}
+      >
+        <SidebarIcon />
+      </button>
       <div
         className="title-block"
         title="Double-click to jump to the newest photos"

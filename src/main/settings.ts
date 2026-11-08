@@ -9,8 +9,10 @@ export interface Settings {
   showLiveBadges: boolean
   showInfoOverlays: boolean
   reduceTransparency: boolean
-  /** 0 = frosted, 1 = clear refractive liquid glass. */
+  /** 0 = frosted, 1 = clear refractive liquid glass. Toolbar, search, popups. */
   glassIntensity: number
+  /** Same scale, for the sidebar and settings sheet. */
+  glassPanels: number
   appearance: 'dark' | 'light' | 'system'
   sidebarCollapsed: boolean
   zoom: number
@@ -48,6 +50,7 @@ export const DEFAULTS: Settings = {
   showInfoOverlays: true,
   reduceTransparency: false,
   glassIntensity: 1,
+  glassPanels: 0.68,
   appearance: 'dark',
   sidebarCollapsed: false,
   zoom: 5,
