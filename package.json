@@ -57,6 +57,9 @@
       "target": ["AppImage", "deb"],
       "icon": "build/icon.png",
       "category": "Photography",
+      "maintainer": "SatyaKesava <satyakesava.k@protectt.ai>",
+      "desktopName": "photos.desktop",
+      "syncDesktopName": true,
       "artifactName": "Photos-${version}-${arch}.${ext}",
       "fileAssociations": [
         { "ext": ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tif", "tiff", "dng", "avif"], "name": "Photo", "description": "Photo" },

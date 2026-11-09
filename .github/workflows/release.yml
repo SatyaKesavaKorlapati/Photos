@@ -31,6 +31,10 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: false
       ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+      # GitHub's own release CDN returns 504 from Actions runners. These mirrors
+      # host the same Electron and electron-builder tool archives.
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
