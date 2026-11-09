@@ -5,6 +5,7 @@
   "description": "A native photo library for Windows, macOS, and Linux. Originals stay untouched.",
   "main": "out/main/index.js",
   "author": "SatyaKesava",
+  "desktopName": "photos.desktop",
   "license": "UNLICENSED",
   "private": true,
   "repository": {
@@ -58,7 +59,6 @@
       "icon": "build/icon.png",
       "category": "Photography",
       "maintainer": "SatyaKesava <satyakesava.k@protectt.ai>",
-      "desktopName": "photos.desktop",
       "syncDesktopName": true,
       "artifactName": "Photos-${version}-${arch}.${ext}",
       "fileAssociations": [
