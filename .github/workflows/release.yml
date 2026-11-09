@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the installers to
+        required: true
+        default: v0.1.0
 
 permissions:
   contents: write
@@ -16,25 +22,50 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            script: npm run dist:win
+            script: npx electron-builder --win --publish never
           - os: macos-latest
-            script: npm run dist:mac
+            script: npx electron-builder --mac --publish never
           - os: ubuntu-latest
-            script: npm run dist:linux
+            script: npx electron-builder --linux --publish never
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .cache/electron
+            .cache/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - run: npm run fetch:ffmpeg
-      - run: ${{ matrix.script }}
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - run: npm run build
+      - name: Package
+        shell: bash
+        run: |
+          set -uo pipefail
+          ok=0
+          for attempt in 1 2 3 4; do
+            echo "Packaging attempt ${attempt}"
+            rm -rf release
+            if ${{ matrix.script }}; then
+              ok=1
+              break
+            fi
+            echo "Attempt ${attempt} failed. The tool download often 504s; waiting, then retrying."
+            sleep $((attempt * 20))
+          done
+          test "$ok" = 1
       - name: Publish installers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         shell: bash
         run: |
           shopt -s nullglob
@@ -43,4 +74,4 @@ jobs:
             echo "No installers were produced."
             exit 1
           fi
-          gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
