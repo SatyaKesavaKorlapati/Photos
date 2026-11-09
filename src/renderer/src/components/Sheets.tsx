@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FolderInput, ImagePlus, CheckCircle2, AlertTriangle, Trash2, ChevronDown } from 'lucide-react'
+import { FolderInput, ImagePlus, CheckCircle2, AlertTriangle, Trash2, ChevronDown, X } from 'lucide-react'
 import { api, mod } from '../api'
 import { navigate, refreshAll, setState, toast, updateSettings, useStore, type Sheet } from '../store'
 import { openMenu } from './Menu'
@@ -188,9 +188,15 @@ function SettingsSheet() {
   )
   return (
     <Backdrop>
-      <div className="sheet" style={{ width: 600 }}>
-        <h2>Settings</h2>
-        <p className="lead">Photos {info?.version ?? ''}</p>
+      <div className="sheet settings-sheet">
+        <div className="sheet-head">
+          <div>
+            <h2>Settings</h2>
+            <p className="lead">Photos {info?.version ?? ''}</p>
+          </div>
+          <button type="button" className="sheet-close" title="Close" onClick={close}><X size={15} /></button>
+        </div>
+        <div className="settings-scroll">
         <input
           className="text-input settings-search"
           placeholder="Search settings"
@@ -314,6 +320,7 @@ function SettingsSheet() {
         <div className="actions">
           <button className="btn" style={{ marginRight: 'auto' }} onClick={() => setState({ sheet: { kind: 'shortcuts' } })}>Keyboard Shortcuts…</button>
           <button className="btn primary" onClick={close}>Done</button>
+        </div>
         </div>
       </div>
     </Backdrop>

@@ -208,14 +208,16 @@ export function Sidebar({ peek = false, onLeave }: { peek?: boolean; onLeave?: (
         <button
           type="button"
           className="tb-btn no-drag sb-pin"
-          title={peek ? 'Keep Sidebar Open' : 'Hide Sidebar'}
+          title={peek ? 'Fix Sidebar' : 'Unfix Sidebar'}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            const next = !peek
-            if (next) disarmPeek()
-            setState({ sidebarCollapsed: next, sidebarPeek: false })
+            if (peek) setState({ sidebarCollapsed: false, sidebarPeek: false })
+            else {
+              disarmPeek()
+              setState({ sidebarCollapsed: true, sidebarPeek: false })
+            }
           }}
         >
           <SidebarIcon />

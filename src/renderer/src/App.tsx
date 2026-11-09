@@ -157,30 +157,32 @@ function Content({ onRange, range }: { onRange: (r: [number, number] | null) => 
 function writeGlass(root: HTMLElement, gi: number, dark: boolean, suffix: '' | '-panel') {
   const fill = (frost: number, clear: number) => (frost * (1 - gi) + clear * gi).toFixed(3)
   const panel = suffix === '-panel'
-  const blur = (panel ? 26 * (1 - gi) + 8 * gi : 24 * (1 - gi) + 2.4 * gi).toFixed(1)
-  const sat = Math.round(panel ? 140 + 50 * gi : 130 + 110 * gi)
-  const br = (dark ? 1.06 + 0.1 * gi : 1.1 + 0.08 * gi).toFixed(3)
+  const blur = (panel ? 52 * (1 - gi) + 8 * gi : 24 * (1 - gi) + 2.4 * gi).toFixed(1)
+  const sat = Math.round(panel ? 120 + 40 * gi : 130 + 110 * gi)
+  const br = (panel
+    ? dark ? 0.92 + 0.1 * gi : 0.98 + 0.06 * gi
+    : dark ? 1.06 + 0.14 * gi : 1.12 + 0.1 * gi).toFixed(3)
   root.style.setProperty(`--gi${suffix}`, String(gi))
   root.style.setProperty(`--g-blur${suffix}`, `${blur}px`)
   root.style.setProperty(`--g-sat${suffix}`, `${sat}%`)
   root.style.setProperty(`--g-br${suffix}`, br)
   root.style.setProperty(`--blur${suffix}`, `blur(${blur}px) saturate(${sat}%) brightness(${br}) contrast(1.06)`)
   if (dark) {
-    root.style.setProperty(`--glass${suffix}`, `rgba(255, 255, 255, ${fill(0.1, panel ? 0.045 : 0.02)})`)
-    root.style.setProperty(`--glass-2${suffix}`, `rgba(255, 255, 255, ${fill(0.14, panel ? 0.06 : 0.03)})`)
-    root.style.setProperty(`--glass-3${suffix}`, `rgba(14, 14, 18, ${fill(0.5, panel ? 0.18 : 0.06)})`)
+    root.style.setProperty(`--glass${suffix}`, `rgba(255, 255, 255, ${fill(panel ? 0.16 : 0.1, panel ? 0.03 : 0.02)})`)
+    root.style.setProperty(`--glass-2${suffix}`, `rgba(255, 255, 255, ${fill(panel ? 0.2 : 0.14, panel ? 0.04 : 0.03)})`)
+    root.style.setProperty(`--glass-3${suffix}`, `rgba(12, 12, 14, ${fill(panel ? 0.92 : 0.42, panel ? 0.1 : 0.06)})`)
     root.style.setProperty(`--glass-border${suffix}`, `rgba(255, 255, 255, ${fill(0.18, 0.32)})`)
     root.style.setProperty(`--glass-edge${suffix}`, `rgba(255, 255, 255, ${fill(0.28, 0.55)})`)
-    root.style.setProperty(`--pill${suffix}`, `rgba(255, 255, 255, ${fill(0.16, panel ? 0.08 : 0.05)})`)
-    root.style.setProperty(`--pill-active${suffix}`, `rgba(255, 255, 255, ${fill(0.3, panel ? 0.14 : 0.1)})`)
+    root.style.setProperty(`--pill${suffix}`, `rgba(255, 255, 255, ${fill(0.16, 0.05)})`)
+    root.style.setProperty(`--pill-active${suffix}`, `rgba(255, 255, 255, ${fill(0.3, 0.1)})`)
   } else {
-    root.style.setProperty(`--glass${suffix}`, `rgba(255, 255, 255, ${fill(0.48, panel ? 0.1 : 0.03)})`)
-    root.style.setProperty(`--glass-2${suffix}`, `rgba(255, 255, 255, ${fill(0.56, panel ? 0.14 : 0.05)})`)
-    root.style.setProperty(`--glass-3${suffix}`, `rgba(255, 255, 255, ${fill(0.78, panel ? 0.22 : 0.08)})`)
+    root.style.setProperty(`--glass${suffix}`, `rgba(255, 255, 255, ${fill(panel ? 0.72 : 0.48, panel ? 0.08 : 0.03)})`)
+    root.style.setProperty(`--glass-2${suffix}`, `rgba(255, 255, 255, ${fill(panel ? 0.78 : 0.56, panel ? 0.1 : 0.05)})`)
+    root.style.setProperty(`--glass-3${suffix}`, `rgba(244, 244, 246, ${fill(panel ? 0.94 : 0.78, panel ? 0.16 : 0.08)})`)
     root.style.setProperty(`--glass-border${suffix}`, `rgba(255, 255, 255, ${fill(0.45, 0.55)})`)
     root.style.setProperty(`--glass-edge${suffix}`, `rgba(255, 255, 255, ${fill(0.7, 0.9)})`)
-    root.style.setProperty(`--pill${suffix}`, `rgba(255, 255, 255, ${fill(0.4, panel ? 0.16 : 0.08)})`)
-    root.style.setProperty(`--pill-active${suffix}`, `rgba(255, 255, 255, ${fill(0.72, panel ? 0.22 : 0.14)})`)
+    root.style.setProperty(`--pill${suffix}`, `rgba(255, 255, 255, ${fill(0.4, 0.08)})`)
+    root.style.setProperty(`--pill-active${suffix}`, `rgba(255, 255, 255, ${fill(0.72, 0.14)})`)
   }
 }
 
@@ -325,9 +327,7 @@ export default function App() {
           setState({ sheet: { kind: 'import', folders: folders.length ? folders : undefined, files: files.length ? files : undefined } })
         }}
       >
-        <div className={`sb-slot${collapsed ? ' closed' : ''}`} aria-hidden={collapsed}>
-          <Sidebar />
-        </div>
+        {!collapsed && <Sidebar />}
         <main className="main">
           <section className="content" onMouseDown={() => getState().menu && setState({ menu: null })}>
             <Content onRange={setRange} range={range} />

@@ -2,11 +2,15 @@
   "name": "photos",
   "productName": "Photos",
   "version": "0.1.0",
-  "description": "An Apple Photos–style library for Windows and macOS",
+  "description": "A native photo library for Windows, macOS, and Linux. Originals stay untouched.",
   "main": "out/main/index.js",
   "author": "SatyaKesava",
   "license": "UNLICENSED",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SatyaKesavaKorlapati/Photos.git"
+  },
   "type": "commonjs",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,8 +18,9 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs",
-    "dist:win": "electron-vite build && electron-builder --win",
-    "dist:mac": "electron-vite build && electron-builder --mac"
+    "dist:win": "electron-vite build && electron-builder --win --publish never",
+    "dist:mac": "electron-vite build && electron-builder --mac --publish never",
+    "dist:linux": "electron-vite build && electron-builder --linux --publish never"
   },
   "build": {
     "appId": "com.satyakesava.photos",
@@ -33,6 +38,7 @@
       ]
     },
     "nsis": {
+      "artifactName": "Photos-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
@@ -40,8 +46,23 @@
       "shortcutName": "Photos",
       "uninstallDisplayName": "Photos"
     },
-    "portable": { "artifactName": "Photos.exe" },
-    "mac": { "target": ["dmg"], "icon": "build/icon.png", "category": "public.app-category.photography" }
+    "portable": { "artifactName": "Photos-${version}-portable.${ext}" },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "build/icon.png",
+      "category": "public.app-category.photography",
+      "identity": null
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "build/icon.png",
+      "category": "Photography",
+      "artifactName": "Photos-${version}-${arch}.${ext}",
+      "fileAssociations": [
+        { "ext": ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tif", "tiff", "dng", "avif"], "name": "Photo", "description": "Photo" },
+        { "ext": ["mp4", "mov", "m4v", "webm"], "name": "Video", "description": "Video" }
+      ]
+    }
   },
   "devDependencies": {
     "@fontsource-variable/inter": "^5.3.0",
