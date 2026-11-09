@@ -58,7 +58,7 @@
       "target": ["AppImage", "deb"],
       "icon": "build/icon.png",
       "category": "Photography",
-      "maintainer": "SatyaKesava <satyakesava.k@protectt.ai>",
+      "maintainer": "SatyaKesava <203692548+SatyaKesavaKorlapati@users.noreply.github.com>",
       "syncDesktopName": true,
       "artifactName": "Photos-${version}-${arch}.${ext}",
       "fileAssociations": [
